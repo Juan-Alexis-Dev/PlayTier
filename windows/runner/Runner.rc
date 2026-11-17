@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.juanalexisdev.PlayTier" "\0"
+            VALUE "CompanyName", "com.juanalexisdev" "\0"
             VALUE "FileDescription", "playtier" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "playtier" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.juanalexisdev.PlayTier. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.juanalexisdev. All rights reserved." "\0"
             VALUE "OriginalFilename", "playtier.exe" "\0"
             VALUE "ProductName", "playtier" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

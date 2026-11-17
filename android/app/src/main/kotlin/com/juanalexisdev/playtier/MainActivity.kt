@@ -1,4 +1,4 @@
-package com.juanalexisdev.PlayTier.playtier
+package com.juanalexisdev.playtier
 
 import io.flutter.embedding.android.FlutterActivity
 
