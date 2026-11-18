@@ -1,11 +1,13 @@
-// SPIKE v0.0a — Steps 1–4: PKCE login (desktop + Android), reading the main
-// playlist with pagination, and playing it on a Spotify Connect device.
+// SPIKE v0.0a — Steps 1–5: PKCE login (desktop + Android), reading the main
+// playlist with pagination, playing it on a Spotify Connect device (desktop)
+// and with spotify_sdk App Remote (Android).
 // Throwaway code: lives only in the `spike/playback` branch.
 //
 // Run with:
 //   flutter run -d linux --dart-define-from-file=config.json
 //   flutter run -d <android-device-id> --dart-define-from-file=config.json
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -14,12 +16,15 @@ import 'package:app_links/app_links.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:spotify_sdk/spotify_sdk.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const clientId = String.fromEnvironment('SPOTIFY_CLIENT_ID');
 const desktopRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
 const androidRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_ANDROID');
 const mainPlaylistId = String.fromEnvironment('SPOTIFY_MAIN_PLAYLIST_ID');
+const appRemoteRedirectUri =
+    String.fromEnvironment('SPOTIFY_REDIRECT_URI_APP_REMOTE');
 
 final redirectUri = Platform.isAndroid ? androidRedirectUri : desktopRedirectUri;
 
@@ -66,6 +71,21 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
   List<SpikeTrack> _tracks = [];
   List<SpikeDevice> _devices = [];
   String? _selectedDeviceId;
+
+  // Android App Remote
+  bool _remoteAuthorized = false;
+  bool _remoteConnected = false;
+  PlayerState? _playerState;
+  StreamSubscription<PlayerState>? _playerSub;
+  final _positionClock = Stopwatch(); // time since the last PlayerState
+  Timer? _ticker; // refreshes the position shown on screen
+
+  @override
+  void dispose() {
+    _playerSub?.cancel();
+    _ticker?.cancel();
+    super.dispose();
+  }
 
   Future<void> _login() async {
     setState(() {
@@ -126,13 +146,12 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
       for (final device in devices) {
         debugPrint(device.toString());
       }
-      // Pre-select the active device, otherwise the first computer.
-      final preferred = devices.where((d) => d.isActive).firstOrNull ??
-          devices.where((d) => d.type == 'Computer').firstOrNull ??
-          devices.firstOrNull;
+      // Keep the user's choice if that device is still there;
+      // otherwise pick the default for this platform.
+      final keepSelection = devices.any((d) => d.id == _selectedDeviceId);
       setState(() {
         _devices = devices;
-        _selectedDeviceId = preferred?.id;
+        if (!keepSelection) _selectedDeviceId = _defaultDevice(devices)?.id;
         _status = devices.isEmpty
             ? 'No devices found: open the Spotify desktop app and try again'
             : 'Found ${devices.length} device(s)';
@@ -142,6 +161,34 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  /// Default device: on Android this phone, on desktop the active device
+  /// or the first computer.
+  SpikeDevice? _defaultDevice(List<SpikeDevice> devices) {
+    if (Platform.isAndroid) {
+      final phone = devices.where((d) => d.type == 'Smartphone').firstOrNull;
+      if (phone != null) return phone;
+    }
+    return devices.where((d) => d.isActive).firstOrNull ??
+        devices.where((d) => d.type == 'Computer').firstOrNull ??
+        devices.firstOrNull;
+  }
+
+  /// Android: if another device (e.g. the PC) is the active Spotify Connect
+  /// device, move playback to this phone first (without starting music).
+  /// Needs the Web API login; skipped if not logged in.
+  Future<void> _makePhoneActive() async {
+    if (_token == null) return;
+    final devices = await fetchDevices(_token!);
+    final phone = devices.where((d) => d.type == 'Smartphone').firstOrNull;
+    if (phone?.id == null || phone!.isActive) return;
+    debugPrint('Transferring playback to "${phone.name}" before App Remote');
+    await transferPlayback(_token!, deviceId: phone.id!);
+    setState(() {
+      _devices = devices;
+      _selectedDeviceId = phone.id;
+    });
   }
 
   Future<void> _playMainPlaylist() async {
@@ -164,10 +211,127 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Android: spotify_sdk App Remote
+  // -------------------------------------------------------------------------
+
+  /// Opens the Spotify authorization screen FROM PlayTier (foreground), so
+  /// Android does not block it. Only needed once per install.
+  Future<void> _authorizeAppRemote() async {
+    setState(() {
+      _loading = true;
+      _status = 'Opening Spotify authorization...';
+    });
+    try {
+      await _makePhoneActive();
+      final token = await SpotifySdk.getAccessToken(
+        clientId: clientId,
+        redirectUrl: appRemoteRedirectUri,
+        scope: 'app-remote-control',
+      ).timeout(const Duration(seconds: 90));
+      debugPrint('App Remote authorized, token: ${token.substring(0, 12)}...');
+      setState(() {
+        _remoteAuthorized = true;
+        _status = 'Authorized. Now tap "Connect App Remote".';
+      });
+    } on SpotifyException catch (e) {
+      setState(() => _status = 'Spotify error: $e');
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _connectAppRemote() async {
+    setState(() {
+      _loading = true;
+      _status = 'Connecting to the Spotify app...';
+    });
+    try {
+      await _makePhoneActive();
+      final connected = await SpotifySdk.connectToSpotifyRemote(
+        clientId: clientId,
+        redirectUrl: appRemoteRedirectUri,
+      ).timeout(const Duration(seconds: 30));
+      if (!connected) throw Exception('connectToSpotifyRemote returned false');
+
+      // Push updates: a new PlayerState arrives on track change, play/pause, seek.
+      await _playerSub?.cancel();
+      _playerSub = SpotifySdk.subscribePlayerState().listen(
+        _onPlayerState,
+        onError: (Object e) => debugPrint('PlayerState error: $e'),
+      );
+      // The position is NOT pushed every second: we advance it locally.
+      _ticker ??= Timer.periodic(const Duration(milliseconds: 500), (_) {
+        if (mounted && _playerState != null) setState(() {});
+      });
+
+      setState(() {
+        _remoteConnected = true;
+        _status = 'Connected to the Spotify app';
+      });
+    } on SpotifyNotInstalledException {
+      setState(() => _status = 'Error: the Spotify app is not installed');
+    } on SpotifyException catch (e) {
+      setState(() => _status = 'Spotify error: $e');
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  void _onPlayerState(PlayerState state) {
+    _positionClock
+      ..reset()
+      ..start();
+    final track = state.track;
+    debugPrint(
+      'PlayerState: ${track?.name} — ${track?.artist.name} | '
+      'pos ${state.playbackPosition} ms / ${track?.duration} ms | '
+      'paused ${state.isPaused} | shuffle ${state.playbackOptions.isShuffling}',
+    );
+    setState(() => _playerState = state);
+  }
+
+  /// Last received position + time elapsed since then (if playing).
+  int get _livePositionMs {
+    final state = _playerState;
+    if (state == null) return 0;
+    final elapsed = state.isPaused ? 0 : _positionClock.elapsedMilliseconds;
+    final position = state.playbackPosition + elapsed;
+    final duration = state.track?.duration ?? 0;
+    return duration > 0 ? min(position, duration) : position;
+  }
+
+  Future<void> _playOnPhone() async {
+    setState(() {
+      _loading = true;
+      _status = 'Starting playback on this phone...';
+    });
+    try {
+      // App Remote controls the ACTIVE Spotify Connect device (it can be the PC).
+      // First move playback to this phone, then play.
+      await SpotifySdk.switchToLocalDevice();
+      await SpotifySdk.play(spotifyUri: 'spotify:playlist:$mainPlaylistId');
+      setState(() => _status = 'Playing main playlist on this phone');
+    } on SpotifyException catch (e) {
+      setState(() => _status = 'Spotify error: $e');
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final missingConfig =
-        clientId.isEmpty || redirectUri.isEmpty || mainPlaylistId.isEmpty;
+    final missingConfig = clientId.isEmpty ||
+        redirectUri.isEmpty ||
+        mainPlaylistId.isEmpty ||
+        (Platform.isAndroid && appRemoteRedirectUri.isEmpty);
+    final nowPlaying = _playerState?.track;
 
     return Scaffold(
       appBar: AppBar(title: const Text('PlayTier — Spike')),
@@ -204,6 +368,24 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Play main playlist'),
                 ),
+                if (Platform.isAndroid) ...[
+                  FilledButton.tonal(
+                    onPressed: _loading ? null : _authorizeAppRemote,
+                    child: Text(
+                      _remoteAuthorized ? 'Authorized ✓' : 'Authorize App Remote',
+                    ),
+                  ),
+                  FilledButton.tonal(
+                    onPressed:
+                        _loading || _remoteConnected ? null : _connectAppRemote,
+                    child: const Text('Connect App Remote'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _loading || !_remoteConnected ? null : _playOnPhone,
+                    icon: const Icon(Icons.phone_android),
+                    label: const Text('Play on this phone'),
+                  ),
+                ],
               ],
             ),
             if (_devices.isNotEmpty) ...[
@@ -225,6 +407,23 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
             ],
             const SizedBox(height: 16),
             SelectableText(_status, textAlign: TextAlign.center),
+            if (nowPlaying != null) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: ListTile(
+                  leading: Icon(
+                    _playerState!.isPaused ? Icons.pause : Icons.play_arrow,
+                  ),
+                  title: Text(nowPlaying.name),
+                  subtitle: Text(
+                    '${nowPlaying.artist.name ?? '?'}\n'
+                    '${_formatMs(_livePositionMs)} / '
+                    '${_formatMs(nowPlaying.duration)}',
+                  ),
+                  isThreeLine: true,
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Expanded(
               child: ListView.builder(
@@ -247,6 +446,11 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
       ),
     );
   }
+}
+
+String _formatMs(int ms) {
+  final seconds = ms ~/ 1000;
+  return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 }
 
 // ---------------------------------------------------------------------------
@@ -382,6 +586,28 @@ Future<List<SpikeDevice>> fetchDevices(String token) async {
       .cast<Map<String, dynamic>>()
       .map(SpikeDevice.fromJson)
       .toList();
+}
+
+/// PUT /me/player — transfers playback to a device (play: false = keep paused).
+Future<void> transferPlayback(
+  String token, {
+  required String deviceId,
+  bool play = false,
+}) async {
+  final res = await http.put(
+    Uri.https('api.spotify.com', '/v1/me/player'),
+    headers: {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    },
+    body: jsonEncode({
+      'device_ids': [deviceId],
+      'play': play,
+    }),
+  );
+  if (res.statusCode >= 300) {
+    throw Exception('Transfer error ${res.statusCode}: ${res.body}');
+  }
 }
 
 /// PUT /me/player/play — plays a context (playlist/album) on a device.
