@@ -1,122 +1,202 @@
+// SPIKE v0.0a — Steps 1–2: Spotify login with PKCE on desktop and Android.
+// Throwaway code: lives only in the `spike/playback` branch.
+//
+// Run with:
+//   flutter run -d linux --dart-define-from-file=config.json
+//   flutter run -d <android-device-id> --dart-define-from-file=config.json
+
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+
+import 'package:app_links/app_links.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
-void main() {
-  runApp(const MyApp());
-}
+const clientId = String.fromEnvironment('SPOTIFY_CLIENT_ID');
+const desktopRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
+const androidRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_ANDROID');
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+final redirectUri = Platform.isAndroid ? androidRedirectUri : desktopRedirectUri;
 
-  // This widget is the root of your application.
+// Scopes needed for the whole spike (read playlists, control playback, create playlists).
+const scopes = [
+  'playlist-read-private',
+  'playlist-read-collaborative',
+  'playlist-modify-private',
+  'playlist-modify-public',
+  'user-read-playback-state',
+  'user-modify-playback-state',
+];
+
+void main() => runApp(const SpikeApp());
+
+class SpikeApp extends StatelessWidget {
+  const SpikeApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF12C66B),
+          brightness: Brightness.dark,
+        ),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const LoginSpikeScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class LoginSpikeScreen extends StatefulWidget {
+  const LoginSpikeScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<LoginSpikeScreen> createState() => _LoginSpikeScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
+  String _status = 'Not logged in';
+  bool _loading = false;
 
-  void _incrementCounter() {
+  Future<void> _login() async {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _loading = true;
+      _status = 'Waiting for login in the browser...';
     });
+    try {
+      final token = await loginWithSpotify();
+      final me = await http.get(
+        Uri.https('api.spotify.com', '/v1/me'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      final body = jsonDecode(me.body) as Map<String, dynamic>;
+      setState(() {
+        _status = 'Logged in as: ${body['display_name'] ?? body['id']}\n'
+            'HTTP ${me.statusCode}\n'
+            'Token: ${token.substring(0, 12)}...';
+      });
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
+      appBar: AppBar(title: const Text('PlayTier — Login spike')),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (clientId.isEmpty || redirectUri.isEmpty)
+                const Text(
+                  'Missing config: run with --dart-define-from-file=config.json',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: _loading ? null : _login,
+                child: const Text('Log in with Spotify'),
+              ),
+              const SizedBox(height: 24),
+              SelectableText(_status, textAlign: TextAlign.center),
+            ],
+          ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// PKCE login flow
+// ---------------------------------------------------------------------------
+
+/// PKCE login: opens Spotify in the browser, waits for the redirect
+/// (local server on desktop, deep link on Android) and exchanges the code.
+Future<String> loginWithSpotify() async {
+  final verifier = _randomString(64);
+  final state = _randomString(16);
+
+  final authUrl = Uri.https('accounts.spotify.com', '/authorize', {
+    'client_id': clientId,
+    'response_type': 'code',
+    'redirect_uri': redirectUri,
+    'code_challenge_method': 'S256',
+    'code_challenge': _codeChallenge(verifier),
+    'state': state,
+    'scope': scopes.join(' '),
+  });
+
+  final params = Platform.isAndroid
+      ? await _waitForAndroidRedirect(authUrl)
+      : await _waitForDesktopRedirect(authUrl);
+
+  if (params['state'] != state) throw Exception('State mismatch');
+  final code = params['code'];
+  if (code == null) throw Exception('Login error: ${params['error']}');
+
+  // Exchange the code for tokens (no client secret thanks to PKCE).
+  final res = await http.post(
+    Uri.https('accounts.spotify.com', '/api/token'),
+    body: {
+      'grant_type': 'authorization_code',
+      'code': code,
+      'redirect_uri': redirectUri,
+      'client_id': clientId,
+      'code_verifier': verifier,
+    },
+  );
+  if (res.statusCode != 200) {
+    throw Exception('Token error ${res.statusCode}: ${res.body}');
+  }
+  return (jsonDecode(res.body) as Map<String, dynamic>)['access_token'] as String;
+}
+
+/// Desktop: receives http://127.0.0.1:PORT/callback on a local server.
+Future<Map<String, String>> _waitForDesktopRedirect(Uri authUrl) async {
+  final redirect = Uri.parse(redirectUri);
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, redirect.port);
+  try {
+    await launchUrl(authUrl, mode: LaunchMode.externalApplication);
+    final request = await server.firstWhere((r) => r.uri.path == redirect.path);
+    request.response
+      ..headers.contentType = ContentType.html
+      ..write('<h2>PlayTier: login complete. You can close this tab.</h2>');
+    await request.response.close();
+    return request.uri.queryParameters;
+  } finally {
+    await server.close(force: true);
+  }
+}
+
+/// Android: receives playtier://callback?code=... as a deep link.
+Future<Map<String, String>> _waitForAndroidRedirect(Uri authUrl) async {
+  final appLinks = AppLinks();
+  // Start listening BEFORE opening the browser so the redirect is not missed.
+  final redirectFuture = appLinks.uriLinkStream.firstWhere(
+    (uri) => uri.scheme == 'playtier' && uri.host == 'callback',
+  );
+  await launchUrl(authUrl, mode: LaunchMode.externalApplication);
+  final uri = await redirectFuture.timeout(const Duration(minutes: 5));
+  return uri.queryParameters;
+}
+
+String _randomString(int length) {
+  const chars =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  final random = Random.secure();
+  return List.generate(length, (_) => chars[random.nextInt(chars.length)]).join();
+}
+
+String _codeChallenge(String verifier) {
+  final digest = sha256.convert(utf8.encode(verifier));
+  return base64UrlEncode(digest.bytes).replaceAll('=', '');
 }
