@@ -1,20 +1,25 @@
-// SPIKE v0.0a — Step 1: Spotify login with PKCE on desktop (Linux/Windows).
+// SPIKE v0.0a — Steps 1–2: Spotify login with PKCE on desktop and Android.
 // Throwaway code: lives only in the `spike/playback` branch.
 //
 // Run with:
 //   flutter run -d linux --dart-define-from-file=config.json
+//   flutter run -d <android-device-id> --dart-define-from-file=config.json
 
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:app_links/app_links.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 const clientId = String.fromEnvironment('SPOTIFY_CLIENT_ID');
-const redirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
+const desktopRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
+const androidRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_ANDROID');
+
+final redirectUri = Platform.isAndroid ? androidRedirectUri : desktopRedirectUri;
 
 // Scopes needed for the whole spike (read playlists, control playback, create playlists).
 const scopes = [
@@ -114,59 +119,74 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
 // PKCE login flow
 // ---------------------------------------------------------------------------
 
-/// Opens the browser for Spotify login, receives the redirect on a local
-/// server (127.0.0.1) and exchanges the code for an access token.
+/// PKCE login: opens Spotify in the browser, waits for the redirect
+/// (local server on desktop, deep link on Android) and exchanges the code.
 Future<String> loginWithSpotify() async {
   final verifier = _randomString(64);
   final state = _randomString(16);
-  final redirect = Uri.parse(redirectUri);
 
-  // 1. Local server that will receive the redirect from Spotify.
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, redirect.port);
+  final authUrl = Uri.https('accounts.spotify.com', '/authorize', {
+    'client_id': clientId,
+    'response_type': 'code',
+    'redirect_uri': redirectUri,
+    'code_challenge_method': 'S256',
+    'code_challenge': _codeChallenge(verifier),
+    'state': state,
+    'scope': scopes.join(' '),
+  });
 
-  try {
-    // 2. Open the Spotify authorization page in the browser.
-    final authUrl = Uri.https('accounts.spotify.com', '/authorize', {
-      'client_id': clientId,
-      'response_type': 'code',
+  final params = Platform.isAndroid
+      ? await _waitForAndroidRedirect(authUrl)
+      : await _waitForDesktopRedirect(authUrl);
+
+  if (params['state'] != state) throw Exception('State mismatch');
+  final code = params['code'];
+  if (code == null) throw Exception('Login error: ${params['error']}');
+
+  // Exchange the code for tokens (no client secret thanks to PKCE).
+  final res = await http.post(
+    Uri.https('accounts.spotify.com', '/api/token'),
+    body: {
+      'grant_type': 'authorization_code',
+      'code': code,
       'redirect_uri': redirectUri,
-      'code_challenge_method': 'S256',
-      'code_challenge': _codeChallenge(verifier),
-      'state': state,
-      'scope': scopes.join(' '),
-    });
-    await launchUrl(authUrl, mode: LaunchMode.externalApplication);
+      'client_id': clientId,
+      'code_verifier': verifier,
+    },
+  );
+  if (res.statusCode != 200) {
+    throw Exception('Token error ${res.statusCode}: ${res.body}');
+  }
+  return (jsonDecode(res.body) as Map<String, dynamic>)['access_token'] as String;
+}
 
-    // 3. Wait for Spotify to redirect to http://127.0.0.1:PORT/callback?code=...
+/// Desktop: receives http://127.0.0.1:PORT/callback on a local server.
+Future<Map<String, String>> _waitForDesktopRedirect(Uri authUrl) async {
+  final redirect = Uri.parse(redirectUri);
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, redirect.port);
+  try {
+    await launchUrl(authUrl, mode: LaunchMode.externalApplication);
     final request = await server.firstWhere((r) => r.uri.path == redirect.path);
-    final params = request.uri.queryParameters;
     request.response
       ..headers.contentType = ContentType.html
       ..write('<h2>PlayTier: login complete. You can close this tab.</h2>');
     await request.response.close();
-
-    if (params['state'] != state) throw Exception('State mismatch');
-    final code = params['code'];
-    if (code == null) throw Exception('Login error: ${params['error']}');
-
-    // 4. Exchange the code for tokens (no client secret thanks to PKCE).
-    final res = await http.post(
-      Uri.https('accounts.spotify.com', '/api/token'),
-      body: {
-        'grant_type': 'authorization_code',
-        'code': code,
-        'redirect_uri': redirectUri,
-        'client_id': clientId,
-        'code_verifier': verifier,
-      },
-    );
-    if (res.statusCode != 200) {
-      throw Exception('Token error ${res.statusCode}: ${res.body}');
-    }
-    return (jsonDecode(res.body) as Map<String, dynamic>)['access_token'] as String;
+    return request.uri.queryParameters;
   } finally {
     await server.close(force: true);
   }
+}
+
+/// Android: receives playtier://callback?code=... as a deep link.
+Future<Map<String, String>> _waitForAndroidRedirect(Uri authUrl) async {
+  final appLinks = AppLinks();
+  // Start listening BEFORE opening the browser so the redirect is not missed.
+  final redirectFuture = appLinks.uriLinkStream.firstWhere(
+    (uri) => uri.scheme == 'playtier' && uri.host == 'callback',
+  );
+  await launchUrl(authUrl, mode: LaunchMode.externalApplication);
+  final uri = await redirectFuture.timeout(const Duration(minutes: 5));
+  return uri.queryParameters;
 }
 
 String _randomString(int length) {
