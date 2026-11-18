@@ -1,4 +1,5 @@
-// SPIKE v0.0a — Steps 1–2: Spotify login with PKCE on desktop and Android.
+// SPIKE v0.0a — Steps 1–3: PKCE login (desktop + Android) and reading the
+// main playlist with pagination.
 // Throwaway code: lives only in the `spike/playback` branch.
 //
 // Run with:
@@ -18,6 +19,7 @@ import 'package:url_launcher/url_launcher.dart';
 const clientId = String.fromEnvironment('SPOTIFY_CLIENT_ID');
 const desktopRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
 const androidRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_ANDROID');
+const mainPlaylistId = String.fromEnvironment('SPOTIFY_MAIN_PLAYLIST_ID');
 
 final redirectUri = Platform.isAndroid ? androidRedirectUri : desktopRedirectUri;
 
@@ -60,6 +62,8 @@ class LoginSpikeScreen extends StatefulWidget {
 class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
   String _status = 'Not logged in';
   bool _loading = false;
+  String? _token;
+  List<SpikeTrack> _tracks = [];
 
   Future<void> _login() async {
     setState(() {
@@ -74,6 +78,7 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
       );
       final body = jsonDecode(me.body) as Map<String, dynamic>;
       setState(() {
+        _token = token;
         _status = 'Logged in as: ${body['display_name'] ?? body['id']}\n'
             'HTTP ${me.statusCode}\n'
             'Token: ${token.substring(0, 12)}...';
@@ -85,34 +90,171 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
     }
   }
 
+  Future<void> _loadPlaylist() async {
+    setState(() {
+      _loading = true;
+      _status = 'Loading main playlist...';
+    });
+    final stopwatch = Stopwatch()..start();
+    try {
+      final tracks = await fetchPlaylistTracks(_token!, mainPlaylistId);
+      debugPrint('--- First 20 tracks ---');
+      for (final (i, track) in tracks.take(20).indexed) {
+        debugPrint('${i + 1}. $track');
+      }
+      setState(() {
+        _tracks = tracks;
+        _status = 'Loaded ${tracks.length} tracks '
+            'in ${stopwatch.elapsedMilliseconds} ms';
+      });
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final missingConfig =
+        clientId.isEmpty || redirectUri.isEmpty || mainPlaylistId.isEmpty;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('PlayTier — Login spike')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (clientId.isEmpty || redirectUri.isEmpty)
-                const Text(
-                  'Missing config: run with --dart-define-from-file=config.json',
-                  style: TextStyle(color: Colors.redAccent),
-                ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _loading ? null : _login,
-                child: const Text('Log in with Spotify'),
+      appBar: AppBar(title: const Text('PlayTier — Spike')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            if (missingConfig)
+              const Text(
+                'Missing config: run with --dart-define-from-file=config.json',
+                style: TextStyle(color: Colors.redAccent),
               ),
-              const SizedBox(height: 24),
-              SelectableText(_status, textAlign: TextAlign.center),
-            ],
-          ),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton(
+                  onPressed: _loading ? null : _login,
+                  child: const Text('Log in with Spotify'),
+                ),
+                FilledButton.tonal(
+                  onPressed: _loading || _token == null ? null : _loadPlaylist,
+                  child: const Text('Load main playlist'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            SelectableText(_status, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView.builder(
+                itemCount: min(_tracks.length, 20),
+                itemBuilder: (context, i) {
+                  final track = _tracks[i];
+                  return ListTile(
+                    dense: true,
+                    leading: Text('${i + 1}'),
+                    title: Text(track.name),
+                    subtitle: Text(
+                      '${track.artists.join(', ')} · added ${track.addedAtLabel}',
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Main playlist (GET /playlists/{id}/items)
+// ---------------------------------------------------------------------------
+
+/// Minimal track model for the spike (the real one comes in v0.1).
+class SpikeTrack {
+  const SpikeTrack({
+    required this.name,
+    required this.artists,
+    required this.addedAt,
+    required this.uri,
+    required this.isLocal,
+  });
+
+  final String name;
+  final List<String> artists;
+  final DateTime? addedAt;
+  final String? uri;
+  final bool isLocal;
+
+  /// Builds a track from one entry of `items[]`.
+  factory SpikeTrack.fromJson(Map<String, dynamic> entry) {
+    final item = entry['item'] as Map<String, dynamic>;
+    final artists = (item['artists'] as List? ?? [])
+        .map((a) => (a as Map<String, dynamic>)['name'] as String? ?? '?')
+        .toList();
+    final addedAt = entry['added_at'] as String?;
+    return SpikeTrack(
+      name: item['name'] as String? ?? '(no name)',
+      artists: artists,
+      addedAt: addedAt == null ? null : DateTime.parse(addedAt),
+      uri: item['uri'] as String?,
+      isLocal: entry['is_local'] as bool? ?? false,
+    );
+  }
+
+  String get addedAtLabel =>
+      addedAt == null ? 'unknown' : addedAt!.toLocal().toString().substring(0, 16);
+
+  @override
+  String toString() =>
+      '$name — ${artists.join(', ')} (added $addedAtLabel)${isLocal ? ' [local]' : ''}';
+}
+
+/// Reads ALL tracks of a playlist following the `next` link (50 per page).
+Future<List<SpikeTrack>> fetchPlaylistTracks(String token, String playlistId) async {
+  final tracks = <SpikeTrack>[];
+  Uri? url = Uri.https('api.spotify.com', '/v1/playlists/$playlistId/items', {
+    'limit': '50',
+    // Only the fields we need: smaller and faster responses.
+    'fields': 'next,total,items(added_at,is_local,item(type,id,name,uri,artists(name)))',
+  });
+  var page = 0;
+
+  while (url != null) {
+    final res = await http.get(url, headers: {'Authorization': 'Bearer $token'});
+
+    if (res.statusCode == 429) {
+      // Rate limit: wait the seconds Spotify asks for and retry the same page.
+      final wait = int.tryParse(res.headers['retry-after'] ?? '') ?? 1;
+      debugPrint('429 received, waiting $wait s');
+      await Future.delayed(Duration(seconds: wait));
+      continue;
+    }
+    if (res.statusCode != 200) {
+      throw Exception('Playlist error ${res.statusCode}: ${res.body}');
+    }
+
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'] as List;
+    page++;
+    debugPrint('Page $page: ${items.length} items (total ${body['total']})');
+
+    for (final entry in items.cast<Map<String, dynamic>>()) {
+      final item = entry['item'] as Map<String, dynamic>?;
+      // Skip unavailable tracks (item == null) and podcast episodes.
+      if (item == null || item['type'] != 'track') continue;
+      tracks.add(SpikeTrack.fromJson(entry));
+    }
+
+    final next = body['next'] as String?;
+    url = next == null ? null : Uri.parse(next);
+  }
+  return tracks;
 }
 
 // ---------------------------------------------------------------------------
