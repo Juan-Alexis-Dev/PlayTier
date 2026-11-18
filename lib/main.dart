@@ -1,5 +1,5 @@
-// SPIKE v0.0a — Steps 1–3: PKCE login (desktop + Android) and reading the
-// main playlist with pagination.
+// SPIKE v0.0a — Steps 1–4: PKCE login (desktop + Android), reading the main
+// playlist with pagination, and playing it on a Spotify Connect device.
 // Throwaway code: lives only in the `spike/playback` branch.
 //
 // Run with:
@@ -64,6 +64,8 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
   bool _loading = false;
   String? _token;
   List<SpikeTrack> _tracks = [];
+  List<SpikeDevice> _devices = [];
+  String? _selectedDeviceId;
 
   Future<void> _login() async {
     setState(() {
@@ -114,6 +116,54 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
     }
   }
 
+  Future<void> _loadDevices() async {
+    setState(() {
+      _loading = true;
+      _status = 'Loading devices...';
+    });
+    try {
+      final devices = await fetchDevices(_token!);
+      for (final device in devices) {
+        debugPrint(device.toString());
+      }
+      // Pre-select the active device, otherwise the first computer.
+      final preferred = devices.where((d) => d.isActive).firstOrNull ??
+          devices.where((d) => d.type == 'Computer').firstOrNull ??
+          devices.firstOrNull;
+      setState(() {
+        _devices = devices;
+        _selectedDeviceId = preferred?.id;
+        _status = devices.isEmpty
+            ? 'No devices found: open the Spotify desktop app and try again'
+            : 'Found ${devices.length} device(s)';
+      });
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _playMainPlaylist() async {
+    setState(() {
+      _loading = true;
+      _status = 'Starting playback...';
+    });
+    try {
+      await startPlayback(
+        _token!,
+        deviceId: _selectedDeviceId!,
+        contextUri: 'spotify:playlist:$mainPlaylistId',
+      );
+      final device = _devices.firstWhere((d) => d.id == _selectedDeviceId);
+      setState(() => _status = 'Playing main playlist on "${device.name}"');
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final missingConfig =
@@ -143,8 +193,36 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
                   onPressed: _loading || _token == null ? null : _loadPlaylist,
                   child: const Text('Load main playlist'),
                 ),
+                FilledButton.tonal(
+                  onPressed: _loading || _token == null ? null : _loadDevices,
+                  child: const Text('List devices'),
+                ),
+                FilledButton.icon(
+                  onPressed: _loading || _selectedDeviceId == null
+                      ? null
+                      : _playMainPlaylist,
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Play main playlist'),
+                ),
               ],
             ),
+            if (_devices.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              // Tap a device to choose where to play.
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final device in _devices)
+                    ChoiceChip(
+                      label: Text('${device.name} (${device.type})'),
+                      selected: device.id == _selectedDeviceId,
+                      onSelected: device.id == null || device.isRestricted
+                          ? null
+                          : (_) => setState(() => _selectedDeviceId = device.id),
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
             SelectableText(_status, textAlign: TextAlign.center),
             const SizedBox(height: 16),
@@ -255,6 +333,75 @@ Future<List<SpikeTrack>> fetchPlaylistTracks(String token, String playlistId) as
     url = next == null ? null : Uri.parse(next);
   }
   return tracks;
+}
+
+// ---------------------------------------------------------------------------
+// Playback on Spotify Connect devices (desktop)
+// ---------------------------------------------------------------------------
+
+/// Minimal device model for the spike.
+class SpikeDevice {
+  const SpikeDevice({
+    required this.id,
+    required this.name,
+    required this.type,
+    required this.isActive,
+    required this.isRestricted,
+  });
+
+  final String? id;
+  final String name;
+  final String type;
+  final bool isActive;
+  final bool isRestricted;
+
+  factory SpikeDevice.fromJson(Map<String, dynamic> json) => SpikeDevice(
+        id: json['id'] as String?,
+        name: json['name'] as String? ?? '(no name)',
+        type: json['type'] as String? ?? 'Unknown',
+        isActive: json['is_active'] as bool? ?? false,
+        isRestricted: json['is_restricted'] as bool? ?? false,
+      );
+
+  @override
+  String toString() => '$name [$type] id=$id'
+      '${isActive ? ' (active)' : ''}${isRestricted ? ' (restricted)' : ''}';
+}
+
+/// GET /me/player/devices — devices where the user can play right now.
+Future<List<SpikeDevice>> fetchDevices(String token) async {
+  final res = await http.get(
+    Uri.https('api.spotify.com', '/v1/me/player/devices'),
+    headers: {'Authorization': 'Bearer $token'},
+  );
+  if (res.statusCode != 200) {
+    throw Exception('Devices error ${res.statusCode}: ${res.body}');
+  }
+  final body = jsonDecode(res.body) as Map<String, dynamic>;
+  return (body['devices'] as List)
+      .cast<Map<String, dynamic>>()
+      .map(SpikeDevice.fromJson)
+      .toList();
+}
+
+/// PUT /me/player/play — plays a context (playlist/album) on a device.
+Future<void> startPlayback(
+  String token, {
+  required String deviceId,
+  required String contextUri,
+}) async {
+  final res = await http.put(
+    Uri.https('api.spotify.com', '/v1/me/player/play', {'device_id': deviceId}),
+    headers: {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    },
+    body: jsonEncode({'context_uri': contextUri}),
+  );
+  // 204 = playback started. Some clients answer 200/202.
+  if (res.statusCode >= 300) {
+    throw Exception('Play error ${res.statusCode}: ${res.body}');
+  }
 }
 
 // ---------------------------------------------------------------------------
