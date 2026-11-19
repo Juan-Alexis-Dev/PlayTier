@@ -1,4 +1,4 @@
-// SPIKE v0.0a — Steps 1–6: PKCE login (desktop + Android), reading the main
+// SPIKE v0.0a/b — Steps 1–6 + lyrics: PKCE login (desktop + Android), reading the main
 // playlist with pagination, playing it on a Spotify Connect device (desktop),
 // spotify_sdk App Remote (Android) and writing a private playback playlist
 // (150 tracks in chunks of 100) that plays in order.
@@ -19,6 +19,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:spotify_sdk/spotify_sdk.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import 'lyrics_spike.dart';
 
 const clientId = String.fromEnvironment('SPOTIFY_CLIENT_ID');
 const desktopRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
@@ -86,6 +88,9 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
   bool _remoteConnected = false;
   PlayerState? _playerState;
   StreamSubscription<PlayerState>? _playerSub;
+  // One broadcast stream shared by this screen and the lyrics screen
+  // (two subscribePlayerState() calls would replace each other).
+  Stream<PlayerState>? _playerStates;
   final _positionClock = Stopwatch(); // time since the last PlayerState
   Timer? _ticker; // refreshes the position shown on screen
 
@@ -302,6 +307,18 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
     }
   }
 
+  /// Opens the lyrics spike screen. Android with App Remote connected uses
+  /// push events; otherwise (desktop, or Android without App Remote) it polls
+  /// GET /me/player.
+  void _openLyrics() {
+    final source = _playerStates != null
+        ? AppRemotePlaybackSource(_playerStates!)
+        : PollingPlaybackSource(_token!);
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => LyricsSpikeScreen(source: source)),
+    );
+  }
+
   Future<void> _playMainPlaylist() async {
     setState(() {
       _loading = true;
@@ -369,7 +386,8 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
 
       // Push updates: a new PlayerState arrives on track change, play/pause, seek.
       await _playerSub?.cancel();
-      _playerSub = SpotifySdk.subscribePlayerState().listen(
+      _playerStates = SpotifySdk.subscribePlayerState().asBroadcastStream();
+      _playerSub = _playerStates!.listen(
         _onPlayerState,
         onError: (Object e) => debugPrint('PlayerState error: $e'),
       );
@@ -450,6 +468,12 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
+            // Controls scroll on their own (max half of the screen) so the
+            // page never overflows on small phones.
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
             if (missingConfig)
               const Text(
                 'Missing config: run with --dart-define-from-file=config.json',
@@ -491,6 +515,13 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
                   onPressed:
                       _loading || _writtenUris == null ? null : _nextAndCheck,
                   child: const Text('Next & check'),
+                ),
+                FilledButton.icon(
+                  onPressed: _token == null && _playerStates == null
+                      ? null
+                      : _openLyrics,
+                  icon: const Icon(Icons.lyrics),
+                  label: const Text('Lyrics'),
                 ),
                 if (Platform.isAndroid) ...[
                   FilledButton.tonal(
@@ -548,6 +579,10 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
                 ),
               ),
             ],
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             if (_writtenUris != null) _buildChunkHeader(),
             Expanded(
