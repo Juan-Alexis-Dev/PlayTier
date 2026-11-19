@@ -1,6 +1,7 @@
-// SPIKE v0.0a — Steps 1–5: PKCE login (desktop + Android), reading the main
-// playlist with pagination, playing it on a Spotify Connect device (desktop)
-// and with spotify_sdk App Remote (Android).
+// SPIKE v0.0a — Steps 1–6: PKCE login (desktop + Android), reading the main
+// playlist with pagination, playing it on a Spotify Connect device (desktop),
+// spotify_sdk App Remote (Android) and writing a private playback playlist
+// (150 tracks in chunks of 100) that plays in order.
 // Throwaway code: lives only in the `spike/playback` branch.
 //
 // Run with:
@@ -23,6 +24,7 @@ const clientId = String.fromEnvironment('SPOTIFY_CLIENT_ID');
 const desktopRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_DESKTOP');
 const androidRedirectUri = String.fromEnvironment('SPOTIFY_REDIRECT_URI_ANDROID');
 const mainPlaylistId = String.fromEnvironment('SPOTIFY_MAIN_PLAYLIST_ID');
+const playbackPlaylistName = 'PlayTier — Playback';
 const appRemoteRedirectUri =
     String.fromEnvironment('SPOTIFY_REDIRECT_URI_APP_REMOTE');
 
@@ -71,6 +73,13 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
   List<SpikeTrack> _tracks = [];
   List<SpikeDevice> _devices = [];
   String? _selectedDeviceId;
+
+  // Step 6: playback playlist
+  String? _playbackPlaylistId;
+  List<String>? _writtenUris; // exact order written to the playlist
+  Map<String, SpikeTrack> _trackByUri = {};
+  int _expectedIndex = 0; // position that should be playing now
+  int _previewChunk = 0; // which chunk of 100 is shown in the list
 
   // Android App Remote
   bool _remoteAuthorized = false;
@@ -124,9 +133,16 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
       for (final (i, track) in tracks.take(20).indexed) {
         debugPrint('${i + 1}. $track');
       }
+      // Tracks that will NOT be written to the playback playlist.
+      final excluded = tracks.where((t) => t.isLocal || !t.isPlayable).toList();
+      for (final t in excluded) {
+        debugPrint('Excluded: $t');
+      }
       setState(() {
         _tracks = tracks;
+        _writtenUris = null; // show the main playlist preview again
         _status = 'Loaded ${tracks.length} tracks '
+            '(${excluded.length} local/not playable) '
             'in ${stopwatch.elapsedMilliseconds} ms';
       });
     } catch (e) {
@@ -189,6 +205,101 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
       _devices = devices;
       _selectedDeviceId = phone.id;
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 6: write a private playlist and play it in order
+  // -------------------------------------------------------------------------
+
+  Future<void> _writeAndPlayInOrder() async {
+    setState(() {
+      _loading = true;
+      _status = 'Writing playback playlist...';
+    });
+    try {
+      // 1. URIs of the main playlist that can actually be played, reversed
+      //    (so the order is clearly different from the original).
+      final source = _tracks
+          .where((t) => t.uri != null && !t.isLocal && t.isPlayable)
+          .toList()
+          .reversed
+          .toList();
+      if (source.isEmpty) throw Exception('Load the main playlist first');
+      _trackByUri = {for (final t in source) t.uri!: t};
+      final uris = [for (final t in source) t.uri!];
+
+      // 2. Find (or create once) the private playback playlist.
+      final stopwatch = Stopwatch()..start();
+      _playbackPlaylistId ??=
+          await findOrCreatePlaylist(_token!, playbackPlaylistName);
+
+      // 3. Replace its items in chunks of 100.
+      await replacePlaylistItems(_token!, _playbackPlaylistId!, uris);
+      final writeMs = stopwatch.elapsedMilliseconds;
+
+      debugPrint('--- Written order (first 10) ---');
+      for (final (i, uri) in uris.take(10).indexed) {
+        debugPrint('${i + 1}. ${_trackByUri[uri]?.name}');
+      }
+
+      // 4. Play from position 0, then turn shuffle off.
+      await startPlayback(
+        _token!,
+        deviceId: _selectedDeviceId!,
+        contextUri: 'spotify:playlist:$_playbackPlaylistId',
+        offsetPosition: 0,
+      );
+      // Player commands are not guaranteed to run in order: give the
+      // device a moment to become active before changing shuffle.
+      await Future.delayed(const Duration(milliseconds: 500));
+      await setShuffle(_token!, deviceId: _selectedDeviceId!, state: false);
+
+      setState(() {
+        _writtenUris = uris;
+        _expectedIndex = 0;
+        _previewChunk = 0;
+        _status = 'Wrote ${uris.length} tracks in $writeMs ms. '
+            'Playing in order — tap "Next & check".';
+      });
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  /// Skips to the next track (or only checks, if [skip] is false) and compares
+  /// what Spotify is playing with the written order.
+  Future<void> _nextAndCheck({bool skip = true}) async {
+    setState(() => _loading = true);
+    try {
+      if (skip) {
+        await skipToNext(_token!, deviceId: _selectedDeviceId!);
+        _expectedIndex++;
+      }
+      await Future.delayed(const Duration(milliseconds: 1200));
+      final state = await fetchPlaybackState(_token!);
+      final playingUri = state?['item']?['uri'] as String?;
+      final expectedUri = _writtenUris![_expectedIndex];
+      final ok = playingUri == expectedUri;
+      debugPrint(
+        '${ok ? 'OK' : 'MISMATCH'} #${_expectedIndex + 1}: '
+        'playing ${state?['item']?['name']} / expected ${_trackByUri[expectedUri]?.name} '
+        '(shuffle ${state?['shuffle_state']})',
+      );
+      setState(() {
+        // Keep the preview on the chunk that contains the current track.
+        _previewChunk = _expectedIndex ~/ 100;
+        _status = '${ok ? '✅' : '❌'} #${_expectedIndex + 1} of ${_writtenUris!.length}\n'
+            'Playing:  ${state?['item']?['name'] ?? '(nothing)'}\n'
+            'Expected: ${_trackByUri[expectedUri]?.name}\n'
+            'Shuffle: ${state?['shuffle_state']}';
+      });
+    } catch (e) {
+      setState(() => _status = 'Error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
   }
 
   Future<void> _playMainPlaylist() async {
@@ -368,6 +479,19 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
                   icon: const Icon(Icons.play_arrow),
                   label: const Text('Play main playlist'),
                 ),
+                FilledButton.tonal(
+                  onPressed: _loading ||
+                          _selectedDeviceId == null ||
+                          _tracks.isEmpty
+                      ? null
+                      : _writeAndPlayInOrder,
+                  child: const Text('Write & play in order'),
+                ),
+                FilledButton.tonal(
+                  onPressed:
+                      _loading || _writtenUris == null ? null : _nextAndCheck,
+                  child: const Text('Next & check'),
+                ),
                 if (Platform.isAndroid) ...[
                   FilledButton.tonal(
                     onPressed: _loading ? null : _authorizeAppRemote,
@@ -425,25 +549,83 @@ class _LoginSpikeScreenState extends State<LoginSpikeScreen> {
               ),
             ],
             const SizedBox(height: 16),
+            if (_writtenUris != null) _buildChunkHeader(),
             Expanded(
-              child: ListView.builder(
-                itemCount: min(_tracks.length, 20),
-                itemBuilder: (context, i) {
-                  final track = _tracks[i];
-                  return ListTile(
-                    dense: true,
-                    leading: Text('${i + 1}'),
-                    title: Text(track.name),
-                    subtitle: Text(
-                      '${track.artists.join(', ')} · added ${track.addedAtLabel}',
-                    ),
-                  );
-                },
-              ),
+              child: _writtenUris == null
+                  ? _buildMainPreview()
+                  : _buildWrittenChunk(),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// Before writing: first 20 tracks of the main playlist.
+  Widget _buildMainPreview() {
+    return ListView.builder(
+      itemCount: min(_tracks.length, 20),
+      itemBuilder: (context, i) {
+        final track = _tracks[i];
+        return ListTile(
+          dense: true,
+          leading: Text('${i + 1}'),
+          title: Text(track.name),
+          subtitle: Text(
+            '${track.artists.join(', ')} · added ${track.addedAtLabel}',
+          ),
+        );
+      },
+    );
+  }
+
+  /// "Chunk 1 of 2 (1–100 of 123)" with previous / next buttons.
+  Widget _buildChunkHeader() {
+    final total = _writtenUris!.length;
+    final chunkCount = (total / 100).ceil();
+    final first = _previewChunk * 100 + 1;
+    final last = min(first + 99, total);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          tooltip: 'Previous chunk',
+          onPressed: _previewChunk > 0
+              ? () => setState(() => _previewChunk--)
+              : null,
+          icon: const Icon(Icons.chevron_left),
+        ),
+        Text('Chunk ${_previewChunk + 1} of $chunkCount  ($first–$last of $total)'),
+        IconButton(
+          tooltip: 'Next chunk',
+          onPressed: _previewChunk < chunkCount - 1
+              ? () => setState(() => _previewChunk++)
+              : null,
+          icon: const Icon(Icons.chevron_right),
+        ),
+      ],
+    );
+  }
+
+  /// After writing: the tracks of the selected chunk, in the written order.
+  /// The track that should be playing now is highlighted.
+  Widget _buildWrittenChunk() {
+    final start = _previewChunk * 100;
+    final end = min(start + 100, _writtenUris!.length);
+    return ListView.builder(
+      itemCount: end - start,
+      itemBuilder: (context, i) {
+        final index = start + i;
+        final track = _trackByUri[_writtenUris![index]];
+        return ListTile(
+          dense: true,
+          selected: index == _expectedIndex,
+          leading: Text('${index + 1}'),
+          title: Text(track?.name ?? _writtenUris![index]),
+          subtitle: Text(track?.artists.join(', ') ?? ''),
+          trailing: index == _expectedIndex ? const Icon(Icons.volume_up) : null,
+        );
+      },
     );
   }
 }
@@ -465,6 +647,7 @@ class SpikeTrack {
     required this.addedAt,
     required this.uri,
     required this.isLocal,
+    required this.isPlayable,
   });
 
   final String name;
@@ -472,6 +655,9 @@ class SpikeTrack {
   final DateTime? addedAt;
   final String? uri;
   final bool isLocal;
+
+  /// false if Spotify cannot play it in the user's country (hidden in the app).
+  final bool isPlayable;
 
   /// Builds a track from one entry of `items[]`.
   factory SpikeTrack.fromJson(Map<String, dynamic> entry) {
@@ -486,6 +672,7 @@ class SpikeTrack {
       addedAt: addedAt == null ? null : DateTime.parse(addedAt),
       uri: item['uri'] as String?,
       isLocal: entry['is_local'] as bool? ?? false,
+      isPlayable: item['is_playable'] as bool? ?? true,
     );
   }
 
@@ -494,7 +681,8 @@ class SpikeTrack {
 
   @override
   String toString() =>
-      '$name — ${artists.join(', ')} (added $addedAtLabel)${isLocal ? ' [local]' : ''}';
+      '$name — ${artists.join(', ')} (added $addedAtLabel)'
+      '${isLocal ? ' [local]' : ''}${isPlayable ? '' : ' [not playable]'}';
 }
 
 /// Reads ALL tracks of a playlist following the `next` link (50 per page).
@@ -503,7 +691,9 @@ Future<List<SpikeTrack>> fetchPlaylistTracks(String token, String playlistId) as
   Uri? url = Uri.https('api.spotify.com', '/v1/playlists/$playlistId/items', {
     'limit': '50',
     // Only the fields we need: smaller and faster responses.
-    'fields': 'next,total,items(added_at,is_local,item(type,id,name,uri,artists(name)))',
+    // market=from_token → Spotify adds `is_playable` for the user's country.
+    'market': 'from_token',
+    'fields': 'next,total,items(added_at,is_local,item(type,id,name,uri,is_playable,artists(name)))',
   });
   var page = 0;
 
@@ -615,6 +805,7 @@ Future<void> startPlayback(
   String token, {
   required String deviceId,
   required String contextUri,
+  int? offsetPosition,
 }) async {
   final res = await http.put(
     Uri.https('api.spotify.com', '/v1/me/player/play', {'device_id': deviceId}),
@@ -622,11 +813,124 @@ Future<void> startPlayback(
       'Authorization': 'Bearer $token',
       'Content-Type': 'application/json',
     },
-    body: jsonEncode({'context_uri': contextUri}),
+    body: jsonEncode({
+      'context_uri': contextUri,
+      if (offsetPosition != null) 'offset': {'position': offsetPosition},
+    }),
   );
   // 204 = playback started. Some clients answer 200/202.
   if (res.statusCode >= 300) {
     throw Exception('Play error ${res.statusCode}: ${res.body}');
+  }
+}
+
+/// PUT /me/player/shuffle — turns shuffle on/off on a device.
+Future<void> setShuffle(
+  String token, {
+  required String deviceId,
+  required bool state,
+}) async {
+  final res = await http.put(
+    Uri.https('api.spotify.com', '/v1/me/player/shuffle', {
+      'state': '$state',
+      'device_id': deviceId,
+    }),
+    headers: {'Authorization': 'Bearer $token'},
+  );
+  if (res.statusCode >= 300) {
+    throw Exception('Shuffle error ${res.statusCode}: ${res.body}');
+  }
+}
+
+/// POST /me/player/next — skips to the next track.
+Future<void> skipToNext(String token, {required String deviceId}) async {
+  final res = await http.post(
+    Uri.https('api.spotify.com', '/v1/me/player/next', {'device_id': deviceId}),
+    headers: {'Authorization': 'Bearer $token'},
+  );
+  if (res.statusCode >= 300) {
+    throw Exception('Next error ${res.statusCode}: ${res.body}');
+  }
+}
+
+/// GET /me/player — current playback state, or null if nothing is active.
+Future<Map<String, dynamic>?> fetchPlaybackState(String token) async {
+  final res = await http.get(
+    Uri.https('api.spotify.com', '/v1/me/player'),
+    headers: {'Authorization': 'Bearer $token'},
+  );
+  if (res.statusCode == 204) return null;
+  if (res.statusCode != 200) {
+    throw Exception('Player state error ${res.statusCode}: ${res.body}');
+  }
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
+
+// ---------------------------------------------------------------------------
+// Playback playlist (step 6)
+// ---------------------------------------------------------------------------
+
+/// Returns the id of the user's playlist called [name], creating it as a
+/// private playlist if it does not exist (so we don't fill the library).
+Future<String> findOrCreatePlaylist(String token, String name) async {
+  final headers = {'Authorization': 'Bearer $token'};
+
+  Uri? url = Uri.https('api.spotify.com', '/v1/me/playlists', {'limit': '50'});
+  while (url != null) {
+    final res = await http.get(url, headers: headers);
+    if (res.statusCode != 200) {
+      throw Exception('My playlists error ${res.statusCode}: ${res.body}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    for (final p in (body['items'] as List).whereType<Map<String, dynamic>>()) {
+      if (p['name'] == name) {
+        debugPrint('Reusing playlist "$name" (${p['id']})');
+        return p['id'] as String;
+      }
+    }
+    final next = body['next'] as String?;
+    url = next == null ? null : Uri.parse(next);
+  }
+
+  final res = await http.post(
+    Uri.https('api.spotify.com', '/v1/me/playlists'),
+    headers: {...headers, 'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'name': name,
+      'public': false,
+      'description': 'Playback queue generated by PlayTier. Safe to ignore.',
+    }),
+  );
+  if (res.statusCode != 201 && res.statusCode != 200) {
+    throw Exception('Create playlist error ${res.statusCode}: ${res.body}');
+  }
+  final id = (jsonDecode(res.body) as Map<String, dynamic>)['id'] as String;
+  debugPrint('Created private playlist "$name" ($id)');
+  return id;
+}
+
+/// Writes [uris] to the playlist in order, in chunks of 100:
+/// the first chunk REPLACES all items (PUT), the rest are APPENDED (POST).
+Future<void> replacePlaylistItems(
+  String token,
+  String playlistId,
+  List<String> uris,
+) async {
+  final url = Uri.https('api.spotify.com', '/v1/playlists/$playlistId/items');
+  final headers = {
+    'Authorization': 'Bearer $token',
+    'Content-Type': 'application/json',
+  };
+  for (var start = 0; start < uris.length; start += 100) {
+    final chunk = uris.sublist(start, min(start + 100, uris.length));
+    final body = jsonEncode({'uris': chunk});
+    final res = start == 0
+        ? await http.put(url, headers: headers, body: body)
+        : await http.post(url, headers: headers, body: body);
+    debugPrint('Chunk ${start ~/ 100 + 1}: ${chunk.length} items -> HTTP ${res.statusCode}');
+    if (res.statusCode >= 300) {
+      throw Exception('Write items error ${res.statusCode}: ${res.body}');
+    }
   }
 }
 
