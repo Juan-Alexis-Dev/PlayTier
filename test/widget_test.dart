@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:playtier/main.dart';
+import 'package:playtier/app/app.dart';
 
 void main() {
-  testWidgets('Spike app shows the login button', (tester) async {
-    await tester.pumpWidget(const SpikeApp());
+  testWidgets('App starts and shows its name', (tester) async {
+    await tester.pumpWidget(const App());
 
-    expect(find.text('Log in with Spotify'), findsOneWidget);
+    expect(find.text('PlayTier'), findsOneWidget);
   });
 }
