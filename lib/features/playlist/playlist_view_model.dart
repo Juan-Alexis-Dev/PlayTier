@@ -3,14 +3,23 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../data/repositories/library_repository.dart';
+import '../../data/repositories/playback_repository.dart';
+import '../../data/repositories/settings_repository.dart';
+import '../../domain/models/playback_exception.dart';
 import '../../domain/models/result.dart';
 import '../../domain/models/track.dart';
 
 /// State of the playlist screen. For now: the main playlist only.
 class PlaylistViewModel extends ChangeNotifier {
-  PlaylistViewModel({required this._library});
+  PlaylistViewModel({
+    required this._library,
+    required this._playback,
+    required this._settings,
+  });
 
   final LibraryRepository _library;
+  final PlaybackRepository _playback;
+  final SettingsRepository _settings;
 
   StreamSubscription<List<Track>>? _tracksSub;
   StreamSubscription<Map<String, String>>? _artistsSub;
@@ -72,6 +81,35 @@ class PlaylistViewModel extends ChangeNotifier {
 
     _syncing = false;
     notifyListeners();
+  }
+
+  /// Plays the main playlist in Spotify, in order, from [startIndex].
+  Future<void> play({int startIndex = 0}) async {
+    final id = await _settings.getMainPlaylistId();
+    if (id == null) return;
+    _errorMessage = null;
+    notifyListeners();
+
+    final result = await _playback.playList(
+      'spotify:playlist:$id',
+      startIndex: startIndex,
+    );
+    if (result case Error(:final error)) {
+      _errorMessage = _playbackMessage(error);
+      notifyListeners();
+    }
+  }
+
+  String _playbackMessage(Exception error) {
+    if (error is! PlaybackException) return 'Could not start playback.';
+    return switch (error.kind) {
+      PlaybackErrorKind.noDevice =>
+        'No active Spotify device. Open Spotify and try again.',
+      PlaybackErrorKind.spotifyAppUnavailable =>
+        'Could not connect to the Spotify app. Open it and try again.',
+      PlaybackErrorKind.rejected =>
+        'Spotify rejected the request. A Premium account is required.',
+    };
   }
 
   Future<void> _loadInfo() async {

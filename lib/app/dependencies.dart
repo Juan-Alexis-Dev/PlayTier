@@ -1,13 +1,19 @@
+import 'dart:io' show Platform;
+
 import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
 
 import '../data/repositories/auth_repository.dart';
 import '../data/repositories/levels_repository.dart';
 import '../data/repositories/library_repository.dart';
+import '../data/repositories/playback_repository.dart';
 import '../data/repositories/playlist_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../data/services/local/app_database.dart';
 import '../data/services/local/secure_storage_service.dart';
+import '../data/services/playback/app_remote_playback_service.dart';
+import '../data/services/playback/connect_playback_service.dart';
+import '../data/services/playback/playback_service.dart';
 import '../data/services/spotify/spotify_api_service.dart';
 import '../data/services/spotify/spotify_auth_service.dart';
 import '../data/services/spotify/spotify_http_client.dart';
@@ -32,6 +38,9 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     refreshAccessToken: authRepository.refreshAccessToken,
   );
   final apiService = SpotifyApiService(httpClient);
+  final PlaybackService playbackService = Platform.isAndroid
+      ? AppRemotePlaybackService(config)
+      : ConnectPlaybackService(apiService);
   final settingsRepository = SettingsRepository(database);
   final playlistRepository = PlaylistRepository(api: apiService, db: database);
   final levelsRepository = LevelsRepository(database);
@@ -40,6 +49,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     db: database,
     settings: settingsRepository,
   );
+  final playbackRepository = PlaybackRepository(playbackService);
 
   // App-wide ViewModels
   final settingsViewModel = SettingsViewModel(settingsRepository);
@@ -54,6 +64,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     Provider.value(value: playlistRepository),
     Provider.value(value: libraryRepository),
     Provider.value(value: levelsRepository),
+    Provider.value(value: playbackRepository),
     ChangeNotifierProvider.value(value: settingsViewModel),
   ];
 }
