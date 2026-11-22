@@ -86,9 +86,9 @@ class TrackLevels extends Table {
       text().references(Tracks, #id, onDelete: KeyAction.cascade)();
 
   // drift needs the column itself inside check(); not a real recursion.
-  // ignore: recursive_getters
   IntColumn get level => integer()
       .withDefault(const Constant(1))
+        // ignore: recursive_getters
       .check(level.isBetweenValues(1, 5))();
 
   @override

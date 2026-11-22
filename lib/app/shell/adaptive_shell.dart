@@ -1,5 +1,5 @@
 // Bottom bar on phones, NavigationRail on desktop; hosts the mini-player.
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
 /// Hosts the 5 tabs: bottom bar on narrow screens, navigation rail on wide
