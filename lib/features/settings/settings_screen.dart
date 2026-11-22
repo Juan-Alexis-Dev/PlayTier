@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Settings tab. Placeholder until v0.7.
 class SettingsScreen extends StatelessWidget {

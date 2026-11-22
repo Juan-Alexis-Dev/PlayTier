@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Square artwork with a title and subtitle below. Used for the large
 /// Main/Liked cards and the "Your playlists" grid.

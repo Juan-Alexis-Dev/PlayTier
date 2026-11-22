@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Square cover from a URL, with a placeholder when missing or broken.
 class CoverImage extends StatelessWidget {

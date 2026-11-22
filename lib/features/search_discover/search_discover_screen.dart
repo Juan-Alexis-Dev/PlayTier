@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Search & Discover tab. Placeholder until v0.5/v0.6.
 class SearchDiscoverScreen extends StatelessWidget {
