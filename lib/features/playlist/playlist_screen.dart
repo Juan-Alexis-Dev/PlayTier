@@ -47,7 +47,9 @@ class PlaylistScreen extends StatelessWidget {
                 totalDuration: vm.totalDuration,
               ),
             ),
-            const SliverToBoxAdapter(child: ActionRow()),
+            SliverToBoxAdapter(
+              child: ActionRow(onPlay: tracks.isEmpty ? null : vm.play),
+            ),
             if (error != null)
               SliverToBoxAdapter(
                 child: Padding(
