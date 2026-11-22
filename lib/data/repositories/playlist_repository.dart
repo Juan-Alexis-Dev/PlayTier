@@ -63,7 +63,7 @@ class PlaylistRepository {
         // App playlists include the private playback playlist: never shown.
         final hiddenIds = {
           for (final row in appRows) row.id,
-          if (mainPlaylistId != null) mainPlaylistId,
+          ?mainPlaylistId,
         };
         final result = await getOwnedSpotifyPlaylists();
         switch (result) {
