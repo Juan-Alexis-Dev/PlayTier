@@ -10,6 +10,8 @@ class CoverImage extends StatelessWidget {
   });
 
   final String? url;
+
+  /// Side length. Use `double.infinity` to fill the parent.
   final double size;
   final double borderRadius;
 
@@ -20,7 +22,8 @@ class CoverImage extends StatelessWidget {
       color: colorScheme.surfaceContainerHighest,
       child: Icon(
         Icons.music_note,
-        size: size * 0.5,
+        // `size` may be infinite when the parent sets the size.
+        size: size.isFinite ? size * 0.5 : 48,
         color: colorScheme.onSurfaceVariant,
       ),
     );

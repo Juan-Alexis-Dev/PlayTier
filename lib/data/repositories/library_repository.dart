@@ -50,6 +50,13 @@ class LibraryRepository {
     });
   }
 
+  /// Number of tracks in the main playlist.
+  Stream<int> watchTrackCount() {
+    final count = _db.tracks.id.count();
+    final query = _db.selectOnly(_db.tracks)..addColumns([count]);
+    return query.map((row) => row.read(count) ?? 0).watchSingle();
+  }
+
   /// Artist id → name, for displaying tracks.
   Stream<Map<String, String>> watchArtistNames() {
     return _db.select(_db.artists).watch().map(

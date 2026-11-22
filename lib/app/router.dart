@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../data/repositories/auth_repository.dart';
+import '../features/home/home_view_model.dart';
 import '../features/browse/browse_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
@@ -31,13 +32,14 @@ class AppRoutes {
 ///
 /// With [auth] and [settings], every route except onboarding requires a
 /// session and finished onboarding. Without them (widget tests of the
-/// shell) there is no redirect.
+/// shell) there is no redirect. Tests can also pick [initialLocation].
 GoRouter createRouter({
   AuthRepository? auth,
   SettingsViewModel? settings,
+  String initialLocation = AppRoutes.home,
 }) {
   return GoRouter(
-    initialLocation: AppRoutes.home,
+    initialLocation: initialLocation,
     refreshListenable: auth == null || settings == null
         ? null
         : Listenable.merge([auth.isLoggedIn, settings]),
@@ -67,7 +69,15 @@ GoRouter createRouter({
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.home,
-              builder: (context, state) => const HomeScreen(),
+              builder: (context, state) => ChangeNotifierProvider(
+                create: (context) => HomeViewModel(
+                  library: context.read(),
+                  levels: context.read(),
+                  playlists: context.read(),
+                  settings: context.read(),
+                )..init(),
+                child: const HomeScreen(),
+              ),
               routes: [
                 // Inside the Home branch so the tabs stay visible.
                 GoRoute(
