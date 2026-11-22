@@ -34,13 +34,14 @@ class SpotifyApiService {
     return playlists;
   }
 
-  /// Current `snapshot_id` of a playlist (changes on every edit).
-  Future<String> getPlaylistSnapshotId(String playlistId) async {
+  /// Id, `snapshot_id`, name and cover of a playlist (one cheap call).
+  Future<SpotifyPlaylistDto> getPlaylistInfo(String playlistId) async {
     final json = await _getJson(
-      Uri.parse('$_baseUrl/playlists/$playlistId')
-          .replace(queryParameters: {'fields': 'snapshot_id'}),
+      Uri.parse('$_baseUrl/playlists/$playlistId').replace(
+        queryParameters: {'fields': 'id,snapshot_id,name,images'},
+      ),
     );
-    return json['snapshot_id'] as String;
+    return SpotifyPlaylistDto.fromJson(json);
   }
 
   /// Playable tracks of a playlist, in playlist order.

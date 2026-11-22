@@ -7,6 +7,8 @@ import '../features/browse/browse_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/onboarding/onboarding_view_model.dart';
+import '../features/playlist/playlist_screen.dart';
+import '../features/playlist/playlist_view_model.dart';
 import '../features/search_discover/search_discover_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/settings/settings_view_model.dart';
@@ -18,6 +20,7 @@ class AppRoutes {
 
   static const onboarding = '/onboarding';
   static const home = '/home';
+  static const mainPlaylist = '/home/main';
   static const search = '/search';
   static const genres = '/genres';
   static const artists = '/artists';
@@ -65,6 +68,17 @@ GoRouter createRouter({
             GoRoute(
               path: AppRoutes.home,
               builder: (context, state) => const HomeScreen(),
+              routes: [
+                // Inside the Home branch so the tabs stay visible.
+                GoRoute(
+                  path: 'main',
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) =>
+                        PlaylistViewModel(library: context.read())..init(),
+                    child: const PlaylistScreen(),
+                  ),
+                ),
+              ],
             ),
           ]),
           StatefulShellBranch(routes: [
