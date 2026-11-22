@@ -11,7 +11,7 @@ class PresetPalettes {
   static const coral = Palette(name: 'Coral', seed: 0xFFFF5C5C);
 
   /// Palette used on first launch and when the saved one is missing.
-  static const defaultPalette = purple;
+  static const defaultPalette = green;
 
   /// All presets, in the order shown in Settings.
   static const all = [green, purple, blue, amber, coral];
