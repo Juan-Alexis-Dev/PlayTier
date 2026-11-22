@@ -1,4 +1,4 @@
-/// Simplified playlist object from `GET /me/playlists`.
+/// Playlist object from `GET /me/playlists` or `GET /playlists/{id}`.
 class SpotifyPlaylistDto {
   const SpotifyPlaylistDto({
     required this.id,
@@ -6,6 +6,7 @@ class SpotifyPlaylistDto {
     required this.ownerId,
     required this.trackCount,
     this.imageUrl,
+    this.snapshotId,
   });
 
   factory SpotifyPlaylistDto.fromJson(Map<String, dynamic> json) {
@@ -22,6 +23,7 @@ class SpotifyPlaylistDto {
       imageUrl: images.isEmpty
           ? null
           : (images.first as Map<String, dynamic>)['url'] as String?,
+      snapshotId: json['snapshot_id'] as String?,
     );
   }
 
@@ -30,4 +32,7 @@ class SpotifyPlaylistDto {
   final String ownerId;
   final int trackCount;
   final String? imageUrl;
+
+  /// Changes on every edit of the playlist.
+  final String? snapshotId;
 }

@@ -11,6 +11,7 @@ import '../data/services/spotify/spotify_auth_service.dart';
 import '../data/services/spotify/spotify_http_client.dart';
 import '../features/settings/settings_view_model.dart';
 import 'config.dart';
+import '../data/repositories/library_repository.dart';
 
 /// Creates services and repositories, loads saved state and returns the
 /// providers for the root `MultiProvider`.
@@ -33,6 +34,12 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
   final settingsRepository = SettingsRepository(database);
   final playlistRepository = PlaylistRepository(apiService);
 
+  final libraryRepository = LibraryRepository(
+  api: apiService,
+  db: database,
+  settings: settingsRepository,
+);
+
   // App-wide ViewModels
   final settingsViewModel = SettingsViewModel(settingsRepository);
 
@@ -45,5 +52,6 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     Provider.value(value: settingsRepository),
     Provider.value(value: playlistRepository),
     ChangeNotifierProvider.value(value: settingsViewModel),
+    Provider.value(value: libraryRepository),
   ];
 }

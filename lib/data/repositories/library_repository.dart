@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../domain/models/result.dart';
+import '../../domain/models/track.dart';
 import '../services/local/app_database.dart';
 import '../services/spotify/dto/spotify_playlist_item_dto.dart';
 import '../services/spotify/spotify_api_service.dart';
@@ -18,6 +19,48 @@ class LibraryRepository {
   final AppDatabase _db;
   final SettingsRepository _settings;
 
+  /// Tracks of the main playlist in playlist order. Emits again whenever
+  /// a sync changes the database.
+  Stream<List<Track>> watchTracks() {
+    final query = _db.select(_db.tracks).join([
+      leftOuterJoin(
+        _db.trackArtists,
+        _db.trackArtists.trackId.equalsExp(_db.tracks.id),
+      ),
+    ])
+      ..orderBy([
+        OrderingTerm.asc(_db.tracks.position),
+        OrderingTerm.asc(_db.trackArtists.position),
+      ]);
+
+    return query.watch().map((rows) {
+      // One row per (track, artist): group them, keeping the order.
+      final tracks = <String, TrackRow>{};
+      final artistIds = <String, List<String>>{};
+      for (final row in rows) {
+        final track = row.readTable(_db.tracks);
+        tracks.putIfAbsent(track.id, () => track);
+        final ids = artistIds.putIfAbsent(track.id, () => []);
+        final link = row.readTableOrNull(_db.trackArtists);
+        if (link != null) ids.add(link.artistId);
+      }
+      return [
+        for (final track in tracks.values) _toTrack(track, artistIds[track.id]!),
+      ];
+    });
+  }
+
+  /// Artist id → name, for displaying tracks.
+  Stream<Map<String, String>> watchArtistNames() {
+    return _db.select(_db.artists).watch().map(
+          (rows) => {for (final artist in rows) artist.id: artist.name},
+        );
+  }
+
+  /// Name and cover of the main playlist (saved on every sync check).
+  Future<({String? name, String? coverUrl})> getMainPlaylistInfo() =>
+      _settings.getMainPlaylistInfo();
+
   /// Syncs the main playlist only if its `snapshot_id` changed (FR-2.2).
   ///
   /// Returns `true` if the local copy was rewritten, `false` if it was
@@ -29,20 +72,41 @@ class LibraryRepository {
         return Result.error(Exception('No main playlist selected'));
       }
 
-      final snapshotId = await _api.getPlaylistSnapshotId(playlistId);
+      final info = await _api.getPlaylistInfo(playlistId);
+      await _settings.setMainPlaylistInfo(
+        name: info.name,
+        coverUrl: info.imageUrl,
+      );
+
+      final snapshotId = info.snapshotId;
       final state = await (_db.select(_db.syncState)
             ..where((s) => s.playlistId.equals(playlistId)))
           .getSingleOrNull();
-      if (!force && state?.snapshotId == snapshotId) {
+      if (!force && snapshotId != null && state?.snapshotId == snapshotId) {
         return const Result.ok(false);
       }
 
       final items = await _api.getPlaylistItems(playlistId);
-      await _write(playlistId, snapshotId, items);
+      await _write(playlistId, snapshotId ?? '', items);
       return const Result.ok(true);
     } on Exception catch (e) {
       return Result.error(e);
     }
+  }
+
+  static Track _toTrack(TrackRow row, List<String> artistIds) {
+    return Track(
+      id: row.id,
+      uri: row.uri,
+      name: row.name,
+      artistIds: artistIds,
+      albumId: row.albumId,
+      albumName: row.albumName,
+      duration: Duration(milliseconds: row.durationMs),
+      releaseDate: row.releaseDate,
+      addedAt: row.addedAt,
+      coverUrl: row.coverUrl,
+    );
   }
 
   /// Replaces the local copy in one transaction (a batch).

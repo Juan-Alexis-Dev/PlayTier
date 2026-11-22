@@ -8,6 +8,8 @@ class SettingsRepository {
   final AppDatabase _db;
 
   static const _mainPlaylistIdKey = 'main_playlist_id';
+  static const _mainPlaylistNameKey = 'main_playlist_name';
+  static const _mainPlaylistCoverKey = 'main_playlist_cover';
   static const _homePlaylistsKey = 'home_playlists';
   static const _paletteKey = 'palette';
   static const _onboardingDoneKey = 'onboarding_done';
@@ -15,6 +17,21 @@ class SettingsRepository {
   Future<String?> getMainPlaylistId() => _get(_mainPlaylistIdKey);
 
   Future<void> setMainPlaylistId(String id) => _set(_mainPlaylistIdKey, id);
+
+  /// Name and cover of the main playlist, saved on every sync check.
+  Future<({String? name, String? coverUrl})> getMainPlaylistInfo() async {
+    final name = await _get(_mainPlaylistNameKey);
+    final cover = await _get(_mainPlaylistCoverKey);
+    return (name: name, coverUrl: cover == null || cover.isEmpty ? null : cover);
+  }
+
+  Future<void> setMainPlaylistInfo({
+    required String name,
+    String? coverUrl,
+  }) async {
+    await _set(_mainPlaylistNameKey, name);
+    await _set(_mainPlaylistCoverKey, coverUrl ?? '');
+  }
 
   /// Defaults to [HomePlaylistsOption.appOnly] when not set.
   Future<HomePlaylistsOption> getHomePlaylistsOption() async {
