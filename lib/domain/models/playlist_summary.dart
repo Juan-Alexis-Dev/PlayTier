@@ -2,14 +2,21 @@
 enum PlaylistType {
   /// The user's main Spotify playlist.
   main,
+
   /// Virtual playlist with tracks of level 2–5.
   liked,
+
   /// Virtual playlist of one genre.
   genre,
+
   /// Virtual playlist of one artist.
   artist,
+
   /// Real Spotify playlist created from the app.
   permanent,
+
+  /// One of the user's own Spotify playlists not created by the app.
+  spotify,
 }
 
 /// Lightweight playlist data for cards and headers (no tracks).
@@ -22,8 +29,8 @@ class PlaylistSummary {
     this.coverUrl,
   });
 
-  /// Spotify playlist id for [PlaylistType.main] and
-  /// [PlaylistType.permanent]; genre name or artist id for virtual ones.
+  /// Spotify playlist id for [PlaylistType.main], [PlaylistType.permanent]
+  /// and [PlaylistType.spotify]; genre name or artist id for virtual ones.
   final String id;
 
   final String name;

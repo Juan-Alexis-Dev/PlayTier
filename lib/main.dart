@@ -1,9 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'app/app.dart';
+import 'app/config.dart';
+import 'app/dependencies.dart';
 
-/// Entry point. Later (v0.1 steps 3 and 7) it will also load AppConfig and
-/// build the dependencies (app/dependencies.dart) before running the app.
-void main() {
-  runApp(const App());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  const config = AppConfig.fromEnvironment();
+  if (!config.isValid) {
+    debugPrint('Missing config keys: ${config.missingKeys.join(', ')}. '
+        'Run with --dart-define-from-file=config.json');
+  }
+
+  final providers = await buildProviders(config);
+  runApp(MultiProvider(providers: providers, child: const App()));
 }

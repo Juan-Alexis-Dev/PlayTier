@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
+import '../data/repositories/auth_repository.dart';
+import '../features/settings/settings_view_model.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
-import 'theme/preset_palettes.dart';
 
-/// Root widget. Reads the active palette from `SettingsViewModel` later.
+/// Root widget. Expects the providers from `dependencies.dart` above it.
 class App extends StatefulWidget {
   const App({super.key});
 
@@ -14,8 +16,11 @@ class App extends StatefulWidget {
 }
 
 class _AppState extends State<App> {
-  // Created once so hot reload and rebuilds keep the navigation state.
-  late final GoRouter _router = createRouter();
+  // Created once so rebuilds (e.g. palette changes) keep navigation state.
+  late final GoRouter _router = createRouter(
+    auth: context.read<AuthRepository>(),
+    settings: context.read<SettingsViewModel>(),
+  );
 
   @override
   void dispose() {
@@ -25,10 +30,12 @@ class _AppState extends State<App> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = context.watch<SettingsViewModel>().palette;
+
     return MaterialApp.router(
       title: 'PlayTier',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.fromPalette(PresetPalettes.defaultPalette),
+      theme: AppTheme.fromPalette(palette),
       routerConfig: _router,
     );
   }
