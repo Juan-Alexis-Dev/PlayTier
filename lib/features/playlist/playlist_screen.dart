@@ -1,9 +1,12 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../filters/filter_sheet.dart';
 import 'playlist_view_model.dart';
 import 'widgets/action_row.dart';
+import 'widgets/active_filters_bar.dart';
 import 'widgets/playlist_header.dart';
+import 'widgets/sort_sheet.dart';
 import 'widgets/track_tile.dart';
 
 /// Spotify-like playlist view: header, action row and track list.
@@ -48,8 +51,32 @@ class PlaylistScreen extends StatelessWidget {
               ),
             ),
             SliverToBoxAdapter(
-              child: ActionRow(onPlay: tracks.isEmpty ? null : vm.play),
+              child: ActionRow(
+                onPlay: tracks.isEmpty || vm.starting ? null : vm.play,
+                onSort: vm.totalCount == 0
+                    ? null
+                    : () => SortSheet.show(
+                          context,
+                          current: vm.sort,
+                          onSelected: vm.setSort,
+                        ),
+                onNewSubplaylist: vm.totalCount == 0
+                    ? null
+                    : () => _openFilters(context, vm),
+              ),
             ),
+            if (vm.isCustomized)
+              SliverToBoxAdapter(
+                child: ActiveFiltersBar(
+                  criteria: vm.criteria,
+                  sort: vm.sort,
+                  shown: tracks.length,
+                  total: vm.totalCount,
+                  onEditFilters: () => _openFilters(context, vm),
+                  onClearFilters: vm.clearFilters,
+                  onClearSort: () => vm.setSort(null),
+                ),
+              ),
             if (error != null)
               SliverToBoxAdapter(
                 child: Padding(
@@ -67,7 +94,11 @@ class PlaylistScreen extends StatelessWidget {
                 child: Center(
                   child: !vm.loaded || vm.syncing
                       ? const CircularProgressIndicator()
-                      : const Text('This playlist has no playable tracks.'),
+                      : Text(
+                          vm.totalCount == 0
+                              ? 'This playlist has no playable tracks.'
+                              : 'No tracks match these filters.',
+                        ),
                 ),
               )
             else
@@ -85,5 +116,10 @@ class PlaylistScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _openFilters(BuildContext context, PlaylistViewModel vm) async {
+    final criteria = await FilterSheet.show(context, vm.createFilterViewModel);
+    if (criteria != null) vm.setFilters(criteria);
   }
 }

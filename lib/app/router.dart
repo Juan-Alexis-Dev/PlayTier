@@ -85,7 +85,9 @@ GoRouter createRouter({
                   builder: (context, state) => ChangeNotifierProvider(
                     create: (context) => PlaylistViewModel(
                       library: context.read(),
+                      levels: context.read(),
                       playback: context.read(),
+                      playlists: context.read(),
                       settings: context.read(),
                     )..init(),
                     child: const PlaylistScreen(),
