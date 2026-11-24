@@ -69,6 +69,66 @@ class SpotifyApiService {
   }
 
   // ---------------------------------------------------------------------
+  // Playlist writing.
+  // ---------------------------------------------------------------------
+
+  /// Max items per add/replace request (Web API limit).
+  static const itemsPerRequest = 100;
+
+  /// Creates a playlist owned by the user (`POST /me/playlists`).
+  Future<SpotifyPlaylistDto> createPlaylist(
+    String name, {
+    bool public = false,
+    String description = '',
+  }) async {
+    final response = await _send(
+      'POST',
+      Uri.parse('$_baseUrl/me/playlists'),
+      body: {'name': name, 'public': public, 'description': description},
+    );
+    return SpotifyPlaylistDto.fromJson(
+      jsonDecode(response.body) as Map<String, dynamic>,
+    );
+  }
+
+  /// Replaces every item of a playlist with [uris], keeping their order.
+  ///
+  /// The first chunk of 100 uses `PUT` (replaces), the rest `POST`
+  /// (appends). An empty [uris] empties the playlist. Duplicates are kept.
+  Future<void> replacePlaylistItems(
+    String playlistId,
+    List<String> uris,
+  ) async {
+    final uri = _itemsUri(playlistId);
+    final chunks = _chunks(uris);
+    await _send('PUT', uri, body: {'uris': chunks.firstOrNull ?? <String>[]});
+    for (final chunk in chunks.skip(1)) {
+      await _send('POST', uri, body: {'uris': chunk});
+    }
+  }
+
+  /// Appends [uris] to a playlist in order, in chunks of 100.
+  Future<void> addPlaylistItems(String playlistId, List<String> uris) async {
+    final uri = _itemsUri(playlistId);
+    for (final chunk in _chunks(uris)) {
+      await _send('POST', uri, body: {'uris': chunk});
+    }
+  }
+
+  Uri _itemsUri(String playlistId) =>
+      Uri.parse('$_baseUrl/playlists/$playlistId/items');
+
+  static List<List<String>> _chunks(List<String> uris) => [
+        for (var i = 0; i < uris.length; i += itemsPerRequest)
+          uris.sublist(
+            i,
+            i + itemsPerRequest < uris.length
+                ? i + itemsPerRequest
+                : uris.length,
+          ),
+      ];
+
+  // ---------------------------------------------------------------------
   // Player (Spotify Connect). All of them need Premium.
   // ---------------------------------------------------------------------
 
@@ -136,17 +196,18 @@ class SpotifyApiService {
       Uri.parse('$_baseUrl/me/player/$path')
           .replace(queryParameters: query.isEmpty ? null : query);
 
-  /// Sends a request whose success has no useful body (`200`/`202`/`204`).
-  Future<void> _send(String method, Uri uri, {Object? body}) async {
+  /// Sends a JSON request and checks for a `2xx` status.
+  Future<http.Response> _send(String method, Uri uri, {Object? body}) async {
     final response = switch (method) {
       'POST' => await _client.post(uri, headers: _jsonHeaders(body),
           body: body == null ? null : jsonEncode(body)),
       _ => await _client.put(uri, headers: _jsonHeaders(body),
           body: body == null ? null : jsonEncode(body)),
     };
-    if (response.statusCode < 200 || response.statusCode > 204) {
+    if (response.statusCode < 200 || response.statusCode > 299) {
       throw SpotifyApiException(response.statusCode, response.body);
     }
+    return response;
   }
 
   Map<String, String>? _jsonHeaders(Object? body) =>
