@@ -64,6 +64,18 @@ class LibraryRepository {
         );
   }
 
+  /// Artist id → genres (filled by genre enrichment, v0.4). Artists
+  /// without genres are not in the map.
+  Stream<Map<String, List<String>>> watchArtistGenres() {
+    return _db.select(_db.artistGenres).watch().map((rows) {
+      final genres = <String, List<String>>{};
+      for (final row in rows) {
+        genres.putIfAbsent(row.artistId, () => []).add(row.genre);
+      }
+      return genres;
+    });
+  }
+
   /// Name and cover of the main playlist (saved on every sync check).
   Future<({String? name, String? coverUrl})> getMainPlaylistInfo() =>
       _settings.getMainPlaylistInfo();
