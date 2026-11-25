@@ -10,6 +10,7 @@ class TrackTile extends StatelessWidget {
     required this.track,
     required this.artists,
     this.onTap,
+    this.onRemove,
   });
 
   final Track track;
@@ -17,6 +18,9 @@ class TrackTile extends StatelessWidget {
   /// Artist names already joined ("A, B").
   final String artists;
   final VoidCallback? onTap;
+
+  /// Shows a remove button next to the duration (preview screen).
+  final VoidCallback? onRemove;
 
   static String _formatDuration(Duration d) {
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -29,7 +33,19 @@ class TrackTile extends StatelessWidget {
       leading: CoverImage(track.coverUrl),
       title: Text(track.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(artists, maxLines: 1, overflow: TextOverflow.ellipsis),
-      trailing: Text(_formatDuration(track.duration)),
+      trailing: onRemove == null
+          ? Text(_formatDuration(track.duration))
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_formatDuration(track.duration)),
+                IconButton(
+                  tooltip: 'Remove',
+                  icon: const Icon(Icons.remove_circle_outline),
+                  onPressed: onRemove,
+                ),
+              ],
+            ),
       onTap: onTap,
     );
   }

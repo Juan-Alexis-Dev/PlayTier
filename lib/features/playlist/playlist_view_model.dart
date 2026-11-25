@@ -8,12 +8,14 @@ import '../../data/repositories/playback_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../domain/engines/filter_engine.dart';
+import '../../domain/engines/playlist_name_generator.dart';
 import '../../domain/engines/sort_engine.dart';
 import '../../domain/models/filter_criteria.dart';
-import '../../domain/models/playback_exception.dart';
+import '../../domain/models/playlist_draft.dart';
 import '../../domain/models/result.dart';
 import '../../domain/models/sort_option.dart';
 import '../../domain/models/track.dart';
+import '../../shared/playback_error_message.dart';
 import '../filters/filter_view_model.dart';
 
 /// State of the playlist screen. For now: the main playlist only.
@@ -118,6 +120,17 @@ class PlaylistViewModel extends ChangeNotifier {
         initial: _criteria,
       );
 
+  /// The visible list as a draft for the preview screen, named after the
+  /// active filters (FR-8.1).
+  PlaylistDraft createDraft() => PlaylistDraft(
+        name: PlaylistNameGenerator.generate(
+          _criteria,
+          artistNames: _artistNames,
+          albumNames: {for (final t in _allTracks) t.albumId: t.albumName},
+        ),
+        tracks: _tracks,
+      );
+
   void setFilters(FilterCriteria criteria) {
     _criteria = criteria;
     _refresh();
@@ -165,7 +178,7 @@ class PlaylistViewModel extends ChangeNotifier {
       final result =
           await _playback.playList(contextUri, startIndex: startIndex);
       if (result case Error(:final error)) {
-        _errorMessage = _playbackMessage(error);
+        _errorMessage = playbackErrorMessage(error);
       }
     }
 
@@ -207,18 +220,6 @@ class PlaylistViewModel extends ChangeNotifier {
             levels: _levelsById,
           );
     notifyListeners();
-  }
-
-  String _playbackMessage(Exception error) {
-    if (error is! PlaybackException) return 'Could not start playback.';
-    return switch (error.kind) {
-      PlaybackErrorKind.noDevice =>
-        'No active Spotify device. Open Spotify and try again.',
-      PlaybackErrorKind.spotifyAppUnavailable =>
-        'Could not connect to the Spotify app. Open it and try again.',
-      PlaybackErrorKind.rejected =>
-        'Spotify rejected the request. A Premium account is required.',
-    };
   }
 
   Future<void> _loadInfo() async {

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../data/repositories/auth_repository.dart';
+import '../domain/models/playlist_draft.dart';
 import '../features/home/home_view_model.dart';
 import '../features/browse/browse_screen.dart';
 import '../features/home/home_screen.dart';
@@ -10,6 +11,8 @@ import '../features/onboarding/onboarding_screen.dart';
 import '../features/onboarding/onboarding_view_model.dart';
 import '../features/playlist/playlist_screen.dart';
 import '../features/playlist/playlist_view_model.dart';
+import '../features/preview/preview_screen.dart';
+import '../features/preview/preview_view_model.dart';
 import '../features/search_discover/search_discover_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/settings/settings_view_model.dart';
@@ -22,6 +25,9 @@ class AppRoutes {
   static const onboarding = '/onboarding';
   static const home = '/home';
   static const mainPlaylist = '/home/main';
+
+  /// Needs a `PlaylistDraft` as `extra`.
+  static const preview = '/home/main/preview';
   static const search = '/search';
   static const genres = '/genres';
   static const artists = '/artists';
@@ -92,6 +98,25 @@ GoRouter createRouter({
                     )..init(),
                     child: const PlaylistScreen(),
                   ),
+                  routes: [
+                    GoRoute(
+                      path: 'preview',
+                      // No draft (e.g. a restored route): back to the list.
+                      redirect: (context, state) =>
+                          state.extra is PlaylistDraft
+                              ? null
+                              : AppRoutes.mainPlaylist,
+                      builder: (context, state) => ChangeNotifierProvider(
+                        create: (context) => PreviewViewModel(
+                          draft: state.extra! as PlaylistDraft,
+                          library: context.read(),
+                          playback: context.read(),
+                          playlists: context.read(),
+                        )..init(),
+                        child: const PreviewScreen(),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

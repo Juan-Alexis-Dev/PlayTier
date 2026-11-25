@@ -16,6 +16,7 @@ class ActiveFiltersBar extends StatelessWidget {
     required this.onEditFilters,
     required this.onClearFilters,
     required this.onClearSort,
+    required this.onCreatePlaylist,
   });
 
   final FilterCriteria criteria;
@@ -25,6 +26,9 @@ class ActiveFiltersBar extends StatelessWidget {
   final VoidCallback onEditFilters;
   final VoidCallback onClearFilters;
   final VoidCallback onClearSort;
+
+  /// Opens the preview with the visible tracks (FR-5.5, FR-8).
+  final VoidCallback? onCreatePlaylist;
 
   @override
   Widget build(BuildContext context) {
@@ -57,6 +61,11 @@ class ActiveFiltersBar extends StatelessWidget {
               onDeleted: onClearSort,
               deleteButtonTooltipMessage: 'Playlist order',
             ),
+          ActionChip(
+            avatar: const Icon(Icons.playlist_add, size: 18),
+            label: const Text('Create playlist'),
+            onPressed: onCreatePlaylist,
+          ),
         ],
       ),
     );
