@@ -1,6 +1,8 @@
+import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
+import '../../app/router.dart';
 import '../filters/filter_sheet.dart';
 import 'playlist_view_model.dart';
 import 'widgets/action_row.dart';
@@ -75,6 +77,12 @@ class PlaylistScreen extends StatelessWidget {
                   onEditFilters: () => _openFilters(context, vm),
                   onClearFilters: vm.clearFilters,
                   onClearSort: () => vm.setSort(null),
+                  onCreatePlaylist: tracks.isEmpty
+                      ? null
+                      : () => context.push(
+                            AppRoutes.preview,
+                            extra: vm.createDraft(),
+                          ),
                 ),
               ),
             if (error != null)
