@@ -50,8 +50,13 @@ void main() {
     settings = MockSettings();
     when(library.watchArtistGenres).thenAnswer((_) => Stream.value(const {}));
     when(levels.watchLevels).thenAnswer((_) => Stream.value(const {}));
-    when(() => playback.playList(any(), startIndex: any(named: 'startIndex')))
-        .thenAnswer((_) async => const Result.ok(null));
+    when(
+      () => playback.playList(
+        any(),
+        startIndex: any(named: 'startIndex'),
+        name: any(named: 'name'),
+      ),
+    ).thenAnswer((_) async => const Result.ok(null));
   });
 
   PlaylistViewModel permanent() => PlaylistViewModel(
@@ -95,7 +100,9 @@ void main() {
       await vm.init();
       await vm.play();
 
-      verify(() => playback.playList('spotify:playlist:perm1')).called(1);
+      verify(
+        () => playback.playList('spotify:playlist:perm1', name: 'Road trip'),
+      ).called(1);
       verifyNever(() => playlists.writePlaybackPlaylist(any()));
       verifyNever(settings.getMainPlaylistId);
     });
@@ -111,11 +118,13 @@ void main() {
 
       verify(() => playlists.writePlaybackPlaylist(['spotify:track:2']))
           .called(1);
-      verify(() => playback.playList('spotify:playlist:pb')).called(1);
+      verify(
+        () => playback.playList('spotify:playlist:pb', name: 'Road trip'),
+      ).called(1);
     });
 
     test('Shuffle plays the visible list with weights', () async {
-      when(() => playback.playShuffled(any()))
+      when(() => playback.playShuffled(any(), name: any(named: 'name')))
           .thenAnswer((_) async => const Result.ok(null));
 
       final vm = permanent();
@@ -123,7 +132,9 @@ void main() {
       vm.setFilters(FilterCriteria(artistIds: {'b'}));
       await vm.shuffle();
 
-      final shuffled = verify(() => playback.playShuffled(captureAny()))
+      final shuffled = verify(
+        () => playback.playShuffled(captureAny(), name: 'Road trip'),
+      )
           .captured
           .single as List<Track>;
       expect(shuffled.map((t) => t.id), ['2']);
@@ -132,7 +143,7 @@ void main() {
     });
 
     test('a Shuffle error shows a message', () async {
-      when(() => playback.playShuffled(any()))
+      when(() => playback.playShuffled(any(), name: any(named: 'name')))
           .thenAnswer((_) async => Result.error(Exception('offline')));
 
       final vm = permanent();

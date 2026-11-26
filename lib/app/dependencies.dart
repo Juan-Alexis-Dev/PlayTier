@@ -60,6 +60,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
   final settingsViewModel = SettingsViewModel(settingsRepository);
   final playerViewModel = PlayerViewModel(
     playback: playbackRepository,
+    levels: levelsRepository,
     loggedIn: authRepository.isLoggedIn,
   );
 

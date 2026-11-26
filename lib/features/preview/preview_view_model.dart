@@ -94,7 +94,7 @@ class PreviewViewModel extends ChangeNotifier {
           case Error():
             return 'Could not prepare the list in Spotify.';
           case Ok(:final value):
-            final played = await _playback.playList(value);
+            final played = await _playback.playList(value, name: nameToSave);
             if (played case Error(:final error)) {
               return playbackErrorMessage(error);
             }
