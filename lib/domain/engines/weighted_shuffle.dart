@@ -13,11 +13,14 @@ import '../models/track.dart';
 /// - If that is impossible (e.g. a very short list), the extra copies of
 ///   the track with the most copies are dropped until it fits (FR-4.4).
 /// - Duplicate tracks in the input (same id) are used once.
+/// - [avoidFirst] (a track id, e.g. the last track of the previous round)
+///   is not placed first, when its copies still fit (FR-4.5).
 /// - Pass a seeded [Random] for repeatable results in tests.
 abstract final class WeightedShuffle {
   static List<Track> generate(
     List<Track> tracks, {
     Map<String, int> levels = const {},
+    String? avoidFirst,
     Random? random,
   }) {
     final rng = random ?? Random();
@@ -38,6 +41,14 @@ abstract final class WeightedShuffle {
 
     final round = <Track>[];
     _Slot? last;
+    if (avoidFirst != null) {
+      final previous =
+          slots.where((s) => s.track.id == avoidFirst).firstOrNull;
+      // Only if its copies still fit with another track placed first.
+      if (previous != null && previous.left <= total - previous.left) {
+        last = previous;
+      }
+    }
     var remaining = total;
     while (remaining > 0) {
       final next = _pickNext(slots, last, remaining);
