@@ -7,6 +7,7 @@ import 'package:playtier/data/repositories/levels_repository.dart';
 import 'package:playtier/data/repositories/library_repository.dart';
 import 'package:playtier/data/repositories/playback_repository.dart';
 import 'package:playtier/domain/models/like_level.dart';
+import 'package:playtier/domain/models/playback_device.dart';
 import 'package:playtier/domain/models/playback_exception.dart';
 import 'package:playtier/domain/models/playback_state.dart';
 import 'package:playtier/domain/models/result.dart';
@@ -333,6 +334,39 @@ void main() {
       await settle();
 
       expect(vm.currentLevel, 1);
+    });
+  });
+
+  group('Devices', () {
+    const pc = PlaybackDevice(id: 'pc', name: 'PC', type: 'Computer');
+
+    test('loadDevices returns the devices', () async {
+      when(playback.getDevices).thenAnswer((_) async => const Result.ok([pc]));
+
+      final loaded = await vm.loadDevices();
+
+      expect(loaded.devices, [pc]);
+      expect(loaded.error, isNull);
+    });
+
+    test('loadDevices returns a message on error', () async {
+      when(playback.getDevices).thenAnswer(
+        (_) async =>
+            const Result.error(PlaybackException(PlaybackErrorKind.rejected)),
+      );
+
+      final loaded = await vm.loadDevices();
+
+      expect(loaded.devices, isEmpty);
+      expect(loaded.error, contains('Spotify rejected the request'));
+    });
+
+    test('transferTo moves playback to the device', () async {
+      when(() => playback.transferTo(any()))
+          .thenAnswer((_) async => const Result.ok(null));
+
+      expect(await vm.transferTo(pc), isNull);
+      verify(() => playback.transferTo('pc')).called(1);
     });
   });
 }

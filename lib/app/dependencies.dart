@@ -40,7 +40,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
   );
   final apiService = SpotifyApiService(httpClient);
   final PlaybackService playbackService = Platform.isAndroid
-      ? AppRemotePlaybackService(config)
+      ? AppRemotePlaybackService(config, apiService)
       : ConnectPlaybackService(apiService);
   final settingsRepository = SettingsRepository(database);
   final playlistRepository = PlaylistRepository(api: apiService, db: database);

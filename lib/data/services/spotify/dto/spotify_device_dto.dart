@@ -1,3 +1,5 @@
+import '../../../../domain/models/playback_device.dart';
+
 /// Device from `GET /me/player/devices` or inside `GET /me/player`.
 class SpotifyDeviceDto {
   const SpotifyDeviceDto({
@@ -28,4 +30,11 @@ class SpotifyDeviceDto {
 
   /// Restricted devices do not accept Web API commands.
   final bool isRestricted;
+
+  /// Domain device, or null if it cannot be controlled (no id, restricted).
+  PlaybackDevice? toDevice() {
+    final id = this.id;
+    if (id == null || isRestricted) return null;
+    return PlaybackDevice(id: id, name: name, type: type, isActive: isActive);
+  }
 }

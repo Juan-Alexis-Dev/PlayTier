@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../../domain/models/playback_device.dart';
 import '../../../domain/models/playback_exception.dart';
 import '../../../domain/models/playback_state.dart';
 import '../spotify/dto/spotify_device_dto.dart';
@@ -71,6 +72,17 @@ class ConnectPlaybackService implements PlaybackService {
   @override
   Future<void> setRepeat(RepeatMode mode) =>
       _command(() => _api.setRepeat(mode.name));
+
+  @override
+  Future<List<PlaybackDevice>> getDevices() async {
+    final devices = await _guard(_api.getDevices);
+    return devices.map((d) => d.toDevice()).nonNulls.toList();
+  }
+
+  /// After the transfer, [_targetDevice] picks it as the active device.
+  @override
+  Future<void> transferTo(String deviceId) =>
+      _command(() => _api.transferPlayback(deviceId));
 
   @override
   Future<void> dispose() async {

@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:playtier/data/services/playback/connect_playback_service.dart';
 import 'package:playtier/data/services/spotify/dto/spotify_player_dto.dart';
 import 'package:playtier/data/services/spotify/spotify_api_service.dart';
+import 'package:playtier/domain/models/playback_device.dart';
 import 'package:playtier/domain/models/playback_exception.dart';
 import 'package:playtier/domain/models/playback_state.dart';
 
@@ -178,6 +179,43 @@ void main() {
       expect(state.deviceName, 'Device pc');
       expect(state.coverUrl, 'https://img/1');
       expect(state.updatedAt, now);
+    });
+  });
+
+  group('devices', () {
+    test('getDevices lists only controllable devices', () async {
+      final fake = FakeSpotify([
+        device('pc', active: true),
+        device('phone', type: 'Smartphone'),
+        device('tv', type: 'TV', restricted: true),
+        {...device('x'), 'id': null},
+      ]);
+
+      final devices = await fake.service().getDevices();
+
+      expect(devices, const [
+        PlaybackDevice(
+          id: 'pc',
+          name: 'Device pc',
+          type: 'Computer',
+          isActive: true,
+        ),
+        PlaybackDevice(id: 'phone', name: 'Device phone', type: 'Smartphone'),
+      ]);
+    });
+
+    test('transferTo moves playback and keeps it playing', () async {
+      final fake = FakeSpotify([device('pc')]);
+
+      await fake.service().transferTo('pc');
+
+      final transfer = fake.requests.firstWhere(
+        (r) => r.method == 'PUT' && r.url.path.endsWith('/me/player'),
+      );
+      expect(jsonDecode(transfer.body), {
+        'device_ids': ['pc'],
+        'play': true,
+      });
     });
   });
 }

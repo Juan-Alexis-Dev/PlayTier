@@ -172,6 +172,17 @@ class SpotifyApiService {
     );
   }
 
+  /// Moves playback to [deviceId] and keeps it playing
+  /// (`PUT /me/player`, FR-11.2).
+  Future<void> transferPlayback(String deviceId) => _send(
+        'PUT',
+        Uri.parse('$_baseUrl/me/player'),
+        body: {
+          'device_ids': [deviceId],
+          'play': true,
+        },
+      );
+
   Future<void> pausePlayback() => _send('PUT', _playerUri('pause'));
 
   Future<void> skipToNext() => _send('POST', _playerUri('next'));

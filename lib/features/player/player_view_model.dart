@@ -6,6 +6,7 @@ import '../../data/repositories/levels_repository.dart';
 import '../../data/repositories/library_repository.dart';
 import '../../data/repositories/playback_repository.dart';
 import '../../domain/models/like_level.dart';
+import '../../domain/models/playback_device.dart';
 import '../../domain/models/playback_state.dart';
 import '../../domain/models/result.dart';
 import '../../shared/playback_error_message.dart';
@@ -136,6 +137,22 @@ class PlayerViewModel extends ChangeNotifier {
     }
     return message;
   }
+
+  /// Devices where Spotify is open, or an error message (FR-11.2).
+  Future<({List<PlaybackDevice> devices, String? error})> loadDevices() async {
+    final result = await _playback.getDevices();
+    return switch (result) {
+      Ok(:final value) => (devices: value, error: null),
+      Error(:final error) => (
+          devices: const <PlaybackDevice>[],
+          error: playbackErrorMessage(error),
+        ),
+    };
+  }
+
+  /// Plays on [device] from now on (e.g. the PC from the phone).
+  Future<String?> transferTo(PlaybackDevice device) =>
+      _command(() => _playback.transferTo(device.id));
 
   /// Sets the like level of the current track (FR-12.3).
   Future<String?> setLevel(int value) async {
