@@ -36,6 +36,7 @@ The app does **not** play audio itself. It reads the user's library through the 
 - **Permanent playlist** — A real playlist created in the user's Spotify account.
 - **Playback playlist** — A private Spotify playlist owned by the app where the computed play order is written so Spotify plays it in order.
 - **Theme palette** — A named dark color set (seed color + optional overrides) that styles the whole app.
+- **Levels file** — A JSON file with the like levels and the app's permanent playlists, used to copy them from one device to another (FR-3.5).
 
 ## 4. Functional requirements
 
@@ -56,9 +57,26 @@ The app does **not** play audio itself. It reads the user's library through the 
 
 ### FR-3 Like levels
 - FR-3.1 Every track in the main playlist has a level from 1 to 5 (default 1). Shown as 5 stars/hearts; UI to raise/lower it.
-- FR-3.2 Levels are stored **locally on each device**. They are **not synced** between devices.
+- FR-3.2 Levels are stored **locally on each device**. They are **not synced automatically** between devices; they can be copied manually with a levels file (FR-3.5).
 - FR-3.3 The level can be set **without playing the track**: long press on a track in any track list (or its "More options" button on desktop) opens a sheet with cover, title and the 5 stars. Tracks not in the main playlist show the stars disabled (same rule as FR-12.4).
 - FR-3.4 Track lists show a small "★N" badge next to the duration for tracks with level 2–5.
+- FR-3.5 **Levels export/import** (Settings):
+  - **Export** saves a levels file (JSON) with every track at level 2–5 and the permanent playlists created with the app (id and name).
+  - **Import** reads a levels file, validates it (app name, format version, levels 1–5) and shows a summary before applying: tracks with a level, tracks not in the main playlist (skipped), permanent playlists.
+  - Import **replaces** the levels: tracks in the file get their level, every other main track goes back to level 1, so both devices end up the same. Permanent playlists from the file are added to the app's list if they still exist in the user's Spotify account.
+  - Moving the file between devices is up to the user (cloud drive, cable, messaging app).
+
+Levels file format (draft):
+
+```json
+{
+  "app": "PlayTier",
+  "version": 1,
+  "exportedAt": "2026-11-26T11:30:00Z",
+  "levels": { "4uLU6hMCjMI75M1A2tKUQC": 5, "7GhIk7Il098yCjg4BQjzvb": 3 },
+  "permanentPlaylists": [{ "id": "37i9dQZF1DXcBWIGoYBM5M", "name": "Rock + Pop" }]
+}
+```
 
 ### FR-4 Weighted shuffle
 - FR-4.1 Applies to any list: main playlist, virtual playlist, filter result, Liked page.
@@ -79,7 +97,7 @@ The app does **not** play audio itself. It reads the user's library through the 
 ### FR-6 Virtual playlists
 - FR-6.1 **Genres page:** one virtual playlist per genre present in the main playlist. A track with several genres appears in several playlists.
 - FR-6.2 **Artists page:** one virtual playlist per artist present in the main playlist (featured artists included).
-- FR-6.3 Virtual playlists update automatically after each sync. Nothing is created in Spotify.
+- FR-6.3 Virtual playlists update automatically after each sync. Nothing is created in Spotify. Because they are computed from the main playlist, every device shows the same virtual playlists.
 
 ### FR-7 Liked page
 - FR-7.1 Shows tracks with level 2–5, each **once**.
@@ -177,7 +195,7 @@ Navigation: bottom bar on phones, side navigation rail on desktop (Linux/Windows
 | 2 | **Search & Discover** | Search bar on top. Text: "Want new music? Try these:". "Own parameters" input (FR-10.5). Four cards in a 2×2 grid: New music from your artists / from your genres / you could like / to try. |
 | 3 | **Genres** | Search bar to find a genre. Symmetric grid of genre cards (name, track count, cover mosaic), ordered by track count. |
 | 4 | **Artists** | Same layout as Genres, with artist content. |
-| 5 | **Settings** | Generic settings page: account, main playlist, Home playlists option, sync (manual sync, last sync time), theme palettes (select/import/export), lyrics on/off, about the app and attributions. |
+| 5 | **Settings** | Generic settings page: account, main playlist, Home playlists option, sync (manual sync, last sync time), like levels (export/import, FR-3.5), theme palettes (select/import/export), lyrics on/off, about the app and attributions. |
 
 Shared screens:
 
@@ -192,9 +210,9 @@ Layout must be symmetric and responsive.
 - NFR-1 Platforms: Android, Linux, Windows.
 - NFR-2 Filtering, sorting and shuffle run locally; results in < 200 ms for a 2,000-track library.
 - NFR-3 Minimize API calls: incremental sync, per-artist caching, retry with backoff on `429`, no sub-second polling.
-- NFR-4 Core logic (filters, sort, weighted shuffle, name generator, LRC parser, palette validation) is pure Dart and covered by unit tests.
+- NFR-4 Core logic (filters, sort, weighted shuffle, name generator, LRC parser, palette validation, levels file codec) is pure Dart and covered by unit tests.
 - NFR-5 No secrets in the repository; Client ID and Last.fm API key loaded from local config.
-- NFR-6 README documents setup: Spotify Developer app, redirect URIs, Premium requirement, 5-user limit, Last.fm key, data source attributions, palette file format.
+- NFR-6 README documents setup: Spotify Developer app, redirect URIs, Premium requirement, 5-user limit, Last.fm key, data source attributions, palette and levels file formats.
 - NFR-7 Responsive layout: phone (bottom navigation) and desktop (navigation rail).
 - NFR-8 All colors come from the active theme; no hard-coded colors in widgets.
 
@@ -219,7 +237,7 @@ Layout must be symmetric and responsive.
 - Licensed lyrics providers (e.g. paid Musixmatch plans).
 - Visual theme editor inside the app (palettes are imported as files).
 - Light mode.
-- Cross-device sync of like levels (no backend).
+- **Automatic** cross-device sync of like levels (no backend). Manual copy with a levels file is supported (FR-3.5).
 
 ## 9. Milestones
 
@@ -233,7 +251,7 @@ Layout must be symmetric and responsive.
 | v0.4 | Genres and Artists pages (virtual playlists) + genre enrichment |
 | v0.5 | Search + add music |
 | v0.6 | Discover |
-| v0.7 | About view + lyrics (if v0.0b passed) + palette import/export |
+| v0.7 | About view + lyrics (if v0.0b passed) + palette import/export + levels export/import |
 
 ## 10. Open questions
 
@@ -261,3 +279,4 @@ Layout must be symmetric and responsive.
 | 2026-11-13 | Like levels are device-local; no cross-device sync, no backend. |
 | 2026-11-13 | Discover → Permanent creates a playlist only; tracks are not added to the main playlist. |
 | 2026-11-26 | Levels can also be set from track lists without playing (long press / "More options" → level sheet), and lists show a "★N" badge for levels 2–5 (FR-3.3, FR-3.4). Added to v0.3 as issue 9; device selector moves to issue 10. |
+| 2026-11-26 | Levels and the app's permanent playlists can be copied between devices with a JSON levels file (export/import in Settings, FR-3.5). Import replaces the levels so both devices match. Chosen over storing levels in Spotify playlists or a backend. Planned for v0.7, next to palette import/export (shared `FileService`). |

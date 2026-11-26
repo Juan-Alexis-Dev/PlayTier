@@ -117,7 +117,7 @@
 8. Liked page: levels 2–5, level filter bar.
 9. Set the level from track lists without playing (long press / "More options" → level sheet) + "★N" badge next to the duration (FR-3.3, FR-3.4).
 10. Device selector (play on PC from phone).
-11. Test v0.3 on Android, Linux and Windows.
+11. Test v0.3 on Android, Linux and Windows (`docs/testing/v0.3.md`).
 
 **Definition of done:** levels can be set from Now Playing and from any track list; shuffle respects levels and spacing; Liked page filters by level; mini-player works on phone and desktop.
 
@@ -162,14 +162,18 @@
 
 ---
 
-## v0.7 — About, lyrics and palette import
+## v0.7 — About, lyrics, palettes and levels file
 
 1. About sheet (Last.fm track/artist info, fallback metadata).
 2. *(If GO in v0.0b)* `LrcParser` + `LyricsSync` + tests, `LyricsRepository`, Lyrics screen with highlight and auto-scroll, LRCLIB credit, Settings toggle.
-3. `PaletteValidator` + tests; import/export palette JSON in Settings.
-4. Settings screen complete: account, main playlist, Home option, manual sync, palettes, lyrics, attributions.
+3. `FileService` (pick/save JSON files with `file_picker`), shared by palettes and levels.
+4. `PaletteValidator` + tests; import/export palette JSON in Settings.
+5. `LevelsBackup` model + `LevelsBackupCodec` (encode/decode/validate the levels file) + tests (FR-3.5).
+6. `LevelsRepository.exportBackup()` / `importBackup()` (replace levels, skip tracks not in main) + `PlaylistRepository` import of permanent playlists that still exist in Spotify + tests.
+7. Settings → Like levels: **Export** and **Import** with a summary dialog before applying.
+8. Settings screen complete: account, main playlist, Home option, manual sync, like levels, palettes, lyrics, attributions.
 
-**Definition of done:** all requirements in `requirements.md` are implemented (or explicitly dropped).
+**Definition of done:** all requirements in `requirements.md` are implemented (or explicitly dropped); levels exported on one device and imported on another give the same Liked page and stars.
 
 ---
 
@@ -180,7 +184,7 @@
 3. Performance check: filters/shuffle < 200 ms with 2,000 tracks.
 4. Accessibility pass: text sizes, contrast, tooltips on icon buttons.
 5. App name, logo and icons (Q-3).
-6. README final: description, screenshots/GIFs, features, architecture summary, setup guide (Spotify app, redirect URIs, Premium, 5-user limit, Last.fm key, `config.json`), attributions, license.
+6. README final: description, screenshots/GIFs, features, architecture summary, setup guide (Spotify app, redirect URIs, Premium, 5-user limit, Last.fm key, `config.json`), palette and levels file formats, attributions, license.
 7. Build artifacts: Android APK, Linux bundle (tar.gz or AppImage), Windows zip.
 8. GitHub Release `v1.0.0` with artifacts and changelog.
 9. Pin the repository on your GitHub profile and add it to LinkedIn/CV.
@@ -191,7 +195,7 @@
 
 ## After v1.0 (ideas, not committed)
 
-- Cross-device sync of levels (export/import or backend).
+- **Automatic** cross-device sync of levels (e.g. one private Spotify playlist per level, or a backend).
 - Riverpod migration.
 - Word-level lyric highlight.
 - Statistics page (top genres/artists of the main playlist).
