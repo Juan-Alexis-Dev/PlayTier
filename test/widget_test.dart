@@ -1,10 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:playtier/app/router.dart';
+import 'package:playtier/data/repositories/playback_repository.dart';
+import 'package:playtier/features/player/player_view_model.dart';
+import 'package:provider/provider.dart';
+
+class MockPlayback extends Mock implements PlaybackRepository {}
 
 void main() {
-  // Tests the shell only: no providers, no login redirect. Starts on
-  // Settings because Home needs repositories (HomeViewModel).
+  // Tests the shell only: no login redirect, and only the PlayerViewModel
+  // the mini-player needs (logged out, so nothing plays and it is hidden).
+  // Starts on Settings because Home needs repositories (HomeViewModel).
   Future<void> pumpShell(WidgetTester tester, {Size? size}) async {
     if (size != null) {
       tester.view.physicalSize = size;
@@ -13,7 +20,18 @@ void main() {
     }
     final router = createRouter(initialLocation: AppRoutes.settings);
     addTearDown(router.dispose);
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    final loggedIn = ValueNotifier(false);
+    addTearDown(loggedIn.dispose);
+    final player = PlayerViewModel(playback: MockPlayback(), loggedIn: loggedIn)
+      ..init();
+    addTearDown(player.dispose);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: player,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
