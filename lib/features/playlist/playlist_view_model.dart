@@ -11,6 +11,7 @@ import '../../domain/engines/filter_engine.dart';
 import '../../domain/engines/playlist_name_generator.dart';
 import '../../domain/engines/sort_engine.dart';
 import '../../domain/models/filter_criteria.dart';
+import '../../domain/models/like_level.dart';
 import '../../domain/models/playlist_draft.dart';
 import '../../domain/models/result.dart';
 import '../../domain/models/sort_option.dart';
@@ -108,6 +109,22 @@ class PlaylistViewModel extends ChangeNotifier {
 
   Duration get totalDuration =>
       _tracks.fold(Duration.zero, (sum, track) => sum + track.duration);
+
+  /// Like level of [track]; null when it is not in the main playlist
+  /// (every main track has a level row after sync), so it cannot be rated.
+  int? levelOf(Track track) => _levelsById[track.id];
+
+  /// Sets the like level of [track] without playing it. The list, Liked
+  /// and the shuffle update through the levels stream. Returns an error
+  /// message, or null.
+  Future<String?> setLevel(Track track, int level) async {
+    if (levelOf(track) == null) return null;
+    final result = await _levels.setLevel(track.id, LikeLevel(level));
+    return switch (result) {
+      Ok() => null,
+      Error() => 'Could not save the level.',
+    };
+  }
 
   /// Artist names of [track], joined with commas.
   String artistsOf(Track track) => track.artistIds

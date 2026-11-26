@@ -6,6 +6,7 @@ import 'package:playtier/data/repositories/playback_repository.dart';
 import 'package:playtier/data/repositories/playlist_repository.dart';
 import 'package:playtier/data/repositories/settings_repository.dart';
 import 'package:playtier/domain/models/filter_criteria.dart';
+import 'package:playtier/domain/models/like_level.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/track.dart';
 import 'package:playtier/features/playlist/playlist_view_model.dart';
@@ -40,6 +41,7 @@ void main() {
   setUpAll(() {
     registerFallbackValue(<String>[]);
     registerFallbackValue(<Track>[]);
+    registerFallbackValue(LikeLevel.defaultLevel);
   });
 
   setUp(() {
@@ -256,6 +258,41 @@ void main() {
         () => playback.playShuffled(captureAny(), name: 'Liked'),
       ).captured.single as List<Track>;
       expect(shuffled.map((t) => t.id), ['l4']);
+    });
+
+    test('levelOf is the level, or null when not in the main playlist',
+        () async {
+      final vm = await liked();
+
+      expect(vm.levelOf(tracks[3]), 5);
+      expect(vm.levelOf(tracks[1]), 1);
+      expect(vm.levelOf(tracks[0]), isNull);
+    });
+
+    test('setLevel saves the level without playing', () async {
+      when(() => levels.setLevel(any(), any()))
+          .thenAnswer((_) async => const Result.ok(null));
+      final vm = await liked();
+
+      expect(await vm.setLevel(tracks[2], 4), isNull);
+
+      verify(() => levels.setLevel('l3', LikeLevel(4))).called(1);
+      verifyNever(() => playback.playList(any(), name: any(named: 'name')));
+    });
+
+    test('setLevel ignores tracks not in the main playlist', () async {
+      final vm = await liked();
+
+      await vm.setLevel(tracks[0], 3);
+      verifyNever(() => levels.setLevel(any(), any()));
+    });
+
+    test('a failed setLevel returns a message', () async {
+      when(() => levels.setLevel(any(), any()))
+          .thenAnswer((_) async => Result.error(Exception('db')));
+      final vm = await liked();
+
+      expect(await vm.setLevel(tracks[2], 4), 'Could not save the level.');
     });
 
     test('a draft without filters is named Liked', () async {

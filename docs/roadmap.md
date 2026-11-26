@@ -1,7 +1,7 @@
 # Music Program — Roadmap
 
 > Step-by-step plan from zero to v1.0. Companion to [`requirements.md`](requirements.md) and [`architecture.md`](architecture.md).
-> Last updated: 2026-11-13
+> Last updated: 2026-11-26
 
 ## How to use this plan
 
@@ -115,9 +115,11 @@
 6. Now Playing screen: context, track, cover with Spotify link, controls, `LevelStars`.
 7. Disabled stars + "Add to main playlist" for tracks not in the main playlist.
 8. Liked page: levels 2–5, level filter bar.
-9. Device selector (play on PC from phone).
+9. Set the level from track lists without playing (long press / "More options" → level sheet) + "★N" badge next to the duration (FR-3.3, FR-3.4).
+10. Device selector (play on PC from phone).
+11. Test v0.3 on Android, Linux and Windows.
 
-**Definition of done:** levels can be set from Now Playing; shuffle respects levels and spacing; Liked page filters by level; mini-player works on phone and desktop.
+**Definition of done:** levels can be set from Now Playing and from any track list; shuffle respects levels and spacing; Liked page filters by level; mini-player works on phone and desktop.
 
 ---
 

@@ -3,11 +3,13 @@ import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/router.dart';
+import '../../domain/models/track.dart';
 import '../filters/filter_sheet.dart';
 import 'playlist_view_model.dart';
 import 'widgets/action_row.dart';
 import 'widgets/active_filters_bar.dart';
 import 'widgets/level_filter_bar.dart';
+import 'widgets/level_sheet.dart';
 import 'widgets/playlist_header.dart';
 import 'widgets/sort_sheet.dart';
 import 'widgets/track_tile.dart';
@@ -16,12 +18,18 @@ import 'widgets/track_tile.dart';
 class PlaylistScreen extends StatelessWidget {
   const PlaylistScreen({super.key});
 
+  /// From this width the "More options" button is shown on each track
+  /// (desktop); narrower screens use a long press.
+  static const _moreButtonBreakpoint = 600.0;
+
   @override
   Widget build(BuildContext context) {
     final vm = context.watch<PlaylistViewModel>();
     final theme = Theme.of(context);
     final error = vm.errorMessage;
     final tracks = vm.tracks;
+    final showMore =
+        MediaQuery.sizeOf(context).width >= _moreButtonBreakpoint;
 
     return Scaffold(
       appBar: AppBar(
@@ -129,6 +137,10 @@ class PlaylistScreen extends StatelessWidget {
                   return TrackTile(
                     track: track,
                     artists: vm.artistsOf(track),
+                    level: vm.levelOf(track),
+                    onLongPress: () => _editLevel(context, vm, track),
+                    onMore:
+                        showMore ? () => _editLevel(context, vm, track) : null,
                   );
                 },
               ),
@@ -136,6 +148,26 @@ class PlaylistScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Opens the level sheet and saves the chosen level (no playback).
+  Future<void> _editLevel(
+    BuildContext context,
+    PlaylistViewModel vm,
+    Track track,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final level = await LevelSheet.show(
+      context,
+      track: track,
+      artists: vm.artistsOf(track),
+      level: vm.levelOf(track),
+    );
+    if (level == null) return;
+    final message = await vm.setLevel(track, level);
+    if (message != null) {
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   static String _emptyMessage(PlaylistViewModel vm) {
