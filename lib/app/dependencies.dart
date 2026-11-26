@@ -61,6 +61,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
   final playerViewModel = PlayerViewModel(
     playback: playbackRepository,
     levels: levelsRepository,
+    library: libraryRepository,
     loggedIn: authRepository.isLoggedIn,
   );
 

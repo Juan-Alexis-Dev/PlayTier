@@ -135,6 +135,28 @@ class _Content extends StatelessWidget {
                 : (n) => runPlayerCommand(context, () => vm.setLevel(n)),
           ),
         ),
+        if (vm.canAddToMain) ...[
+          Text(
+            'Not in your main playlist, so it has no level yet.',
+            textAlign: TextAlign.center,
+            style: text.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: FilledButton.tonalIcon(
+              onPressed: vm.addingToMain
+                  ? null
+                  : () => runPlayerCommand(context, vm.addToMainPlaylist),
+              icon: vm.addingToMain
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.playlist_add),
+              label: const Text('Add to main playlist'),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         _ProgressBar(
           position: vm.position,
