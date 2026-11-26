@@ -55,6 +55,7 @@ class PlaylistScreen extends StatelessWidget {
             SliverToBoxAdapter(
               child: ActionRow(
                 onPlay: tracks.isEmpty || vm.starting ? null : vm.play,
+                onShuffle: tracks.isEmpty || vm.starting ? null : vm.shuffle,
                 onSort: vm.totalCount == 0
                     ? null
                     : () => SortSheet.show(

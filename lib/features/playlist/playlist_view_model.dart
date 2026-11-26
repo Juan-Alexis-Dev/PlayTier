@@ -203,6 +203,23 @@ class PlaylistViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Weighted shuffle of what is shown (FR-4.1): every visible track
+  /// plays as many times as its like level. The sort order does not matter.
+  Future<void> shuffle() async {
+    if (_starting || _tracks.isEmpty) return;
+    _starting = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    final result = await _playback.playShuffled(_tracks);
+    if (result case Error(:final error)) {
+      _errorMessage = playbackErrorMessage(error);
+    }
+
+    _starting = false;
+    notifyListeners();
+  }
+
   /// Context URI to play, or null (with [_errorMessage] set) on failure.
   Future<String?> _contextToPlay() async {
     if (!isCustomized) {

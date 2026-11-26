@@ -3,7 +3,8 @@ import 'package:material_ui/material_ui.dart';
 /// Play, Shuffle, Sort, New subplaylist, Add music, More options.
 ///
 /// Every callback is optional: a null callback shows a disabled button.
-/// They are wired in v0.2 (play, sort, subplaylist) and v0.3 (shuffle).
+/// Play, Shuffle, Sort and New subplaylist are wired; Add music (v0.5)
+/// and More options come later.
 class ActionRow extends StatelessWidget {
   const ActionRow({
     super.key,

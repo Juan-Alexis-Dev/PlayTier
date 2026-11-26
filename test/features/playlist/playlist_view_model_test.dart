@@ -37,7 +37,10 @@ void main() {
   late MockPlaylists playlists;
   late MockSettings settings;
 
-  setUpAll(() => registerFallbackValue(<String>[]));
+  setUpAll(() {
+    registerFallbackValue(<String>[]);
+    registerFallbackValue(<Track>[]);
+  });
 
   setUp(() {
     library = MockLibrary();
@@ -109,6 +112,35 @@ void main() {
       verify(() => playlists.writePlaybackPlaylist(['spotify:track:2']))
           .called(1);
       verify(() => playback.playList('spotify:playlist:pb')).called(1);
+    });
+
+    test('Shuffle plays the visible list with weights', () async {
+      when(() => playback.playShuffled(any()))
+          .thenAnswer((_) async => const Result.ok(null));
+
+      final vm = permanent();
+      await vm.init();
+      vm.setFilters(FilterCriteria(artistIds: {'b'}));
+      await vm.shuffle();
+
+      final shuffled = verify(() => playback.playShuffled(captureAny()))
+          .captured
+          .single as List<Track>;
+      expect(shuffled.map((t) => t.id), ['2']);
+      expect(vm.starting, isFalse);
+      expect(vm.errorMessage, isNull);
+    });
+
+    test('a Shuffle error shows a message', () async {
+      when(() => playback.playShuffled(any()))
+          .thenAnswer((_) async => Result.error(Exception('offline')));
+
+      final vm = permanent();
+      await vm.init();
+      await vm.shuffle();
+
+      expect(vm.errorMessage, 'Could not start playback.');
+      expect(vm.starting, isFalse);
     });
 
     test('refresh reads the playlist again', () async {
