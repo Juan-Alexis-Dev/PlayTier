@@ -80,6 +80,32 @@ class LibraryRepository {
   Future<({String? name, String? coverUrl})> getMainPlaylistInfo() =>
       _settings.getMainPlaylistInfo();
 
+  /// Adds [trackUri] to the end of the main playlist in Spotify, then
+  /// syncs so it appears here with level 1 (FR-12.4, FR-2.3).
+  ///
+  /// Does nothing if the track is already in the main playlist. If only
+  /// the sync fails, the result is still ok: the next sync brings it in.
+  Future<Result<void>> addToMain(String trackUri) async {
+    try {
+      final playlistId = await _settings.getMainPlaylistId();
+      if (playlistId == null) {
+        return Result.error(Exception('No main playlist selected'));
+      }
+
+      final existing = await (_db.select(_db.tracks)
+            ..where((t) => t.uri.equals(trackUri))
+            ..limit(1))
+          .getSingleOrNull();
+      if (existing != null) return const Result.ok(null);
+
+      await _api.addPlaylistItems(playlistId, [trackUri]);
+      await syncIfChanged();
+      return const Result.ok(null);
+    } on Exception catch (e) {
+      return Result.error(e);
+    }
+  }
+
   /// Syncs the main playlist only if its `snapshot_id` changed (FR-2.2).
   ///
   /// Returns `true` if the local copy was rewritten, `false` if it was

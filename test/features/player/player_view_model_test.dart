@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playtier/data/repositories/levels_repository.dart';
+import 'package:playtier/data/repositories/library_repository.dart';
 import 'package:playtier/data/repositories/playback_repository.dart';
 import 'package:playtier/domain/models/like_level.dart';
 import 'package:playtier/domain/models/playback_exception.dart';
@@ -14,6 +15,8 @@ import 'package:playtier/features/player/player_view_model.dart';
 class MockPlayback extends Mock implements PlaybackRepository {}
 
 class MockLevels extends Mock implements LevelsRepository {}
+
+class MockLibrary extends Mock implements LibraryRepository {}
 
 final start = DateTime(2026, 1, 1, 12);
 
@@ -39,6 +42,7 @@ Future<void> settle() => Future<void>.delayed(Duration.zero);
 void main() {
   late MockPlayback playback;
   late MockLevels levels;
+  late MockLibrary library;
   late StreamController<PlaybackState?> player;
   late StreamController<Map<String, int>> levelRows;
   late ValueNotifier<bool> loggedIn;
@@ -55,6 +59,7 @@ void main() {
   setUp(() {
     playback = MockPlayback();
     levels = MockLevels();
+    library = MockLibrary();
     player = StreamController<PlaybackState?>.broadcast();
     levelRows = StreamController<Map<String, int>>.broadcast();
     loggedIn = ValueNotifier(true);
@@ -71,10 +76,13 @@ void main() {
     when(() => levels.watchLevels()).thenAnswer((_) => levelRows.stream);
     when(() => levels.setLevel(any(), any()))
         .thenAnswer((_) async => const Result.ok(null));
+    when(() => library.addToMain(any()))
+        .thenAnswer((_) async => const Result.ok(null));
 
     vm = PlayerViewModel(
       playback: playback,
       levels: levels,
+      library: library,
       loggedIn: loggedIn,
       clock: () => now,
     );
@@ -261,6 +269,70 @@ void main() {
 
       expect(levelRows.hasListener, isFalse);
       expect(vm.currentLevel, isNull);
+    });
+  });
+
+  group('Add to main playlist', () {
+    Future<void> startPlaying(Map<String, int> rows) async {
+      vm.init();
+      player.add(playing());
+      levelRows.add(rows);
+      await settle();
+    }
+
+    test('offered only for tracks not in the main playlist', () async {
+      await startPlaying(const {'other': 1});
+      expect(vm.canAddToMain, isTrue);
+
+      levelRows.add(const {'t1': 1});
+      await settle();
+      expect(vm.canAddToMain, isFalse);
+    });
+
+    test('not offered before the levels arrive', () async {
+      vm.init();
+      player.add(playing());
+      await settle();
+
+      expect(vm.canAddToMain, isFalse);
+    });
+
+    test('adds the playing track by URI', () async {
+      await startPlaying(const {});
+
+      expect(await vm.addToMainPlaylist(), isNull);
+      verify(() => library.addToMain('spotify:track:t1')).called(1);
+      expect(vm.addingToMain, isFalse);
+    });
+
+    test('a failed add returns a message', () async {
+      when(() => library.addToMain(any()))
+          .thenAnswer((_) async => Result.error(Exception('offline')));
+      await startPlaying(const {});
+
+      expect(
+        await vm.addToMainPlaylist(),
+        'Could not add the track to the main playlist.',
+      );
+    });
+
+    test('does nothing when the track is already in the main playlist',
+        () async {
+      await startPlaying(const {'t1': 2});
+
+      await vm.addToMainPlaylist();
+      verifyNever(() => library.addToMain(any()));
+    });
+
+    test('stars become enabled once the sync gives it level 1', () async {
+      await startPlaying(const {});
+      expect(vm.currentLevel, isNull);
+
+      await vm.addToMainPlaylist();
+      levelRows.add(const {'t1': 1});
+      await settle();
+
+      expect(vm.currentLevel, 1);
     });
   });
 }

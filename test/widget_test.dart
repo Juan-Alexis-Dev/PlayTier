@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playtier/app/router.dart';
 import 'package:playtier/data/repositories/levels_repository.dart';
+import 'package:playtier/data/repositories/library_repository.dart';
 import 'package:playtier/data/repositories/playback_repository.dart';
 import 'package:playtier/features/player/player_view_model.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +11,8 @@ import 'package:provider/provider.dart';
 class MockPlayback extends Mock implements PlaybackRepository {}
 
 class MockLevels extends Mock implements LevelsRepository {}
+
+class MockLibrary extends Mock implements LibraryRepository {}
 
 void main() {
   // Tests the shell only: no login redirect, and only the PlayerViewModel
@@ -28,6 +31,7 @@ void main() {
     final player = PlayerViewModel(
       playback: MockPlayback(),
       levels: MockLevels(),
+      library: MockLibrary(),
       loggedIn: loggedIn,
     )..init();
     addTearDown(player.dispose);

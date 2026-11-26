@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../../data/repositories/levels_repository.dart';
+import '../../data/repositories/library_repository.dart';
 import '../../data/repositories/playback_repository.dart';
 import '../../domain/models/like_level.dart';
 import '../../domain/models/playback_state.dart';
@@ -22,12 +23,14 @@ class PlayerViewModel extends ChangeNotifier {
   PlayerViewModel({
     required this._playback,
     required this._levels,
+    required this._library,
     required this._loggedIn,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
   final PlaybackRepository _playback;
   final LevelsRepository _levels;
+  final LibraryRepository _library;
   final ValueListenable<bool> _loggedIn;
   final DateTime Function() _clock;
 
@@ -36,6 +39,8 @@ class PlayerViewModel extends ChangeNotifier {
   Timer? _ticker;
   PlaybackState? _state;
   Map<String, int> _levelsById = const {};
+  bool _levelsLoaded = false;
+  bool _addingToMain = false;
 
   /// Current player state; null when nothing is playing.
   PlaybackState? get state => _state;
@@ -54,6 +59,15 @@ class PlayerViewModel extends ChangeNotifier {
     final state = _state;
     return state == null ? null : _levelsById[state.trackId];
   }
+
+  /// The current track is not in the main playlist: stars are disabled
+  /// and "Add to main playlist" is offered (FR-12.4).
+  /// Waits for the first levels, so it does not flash on open.
+  bool get canAddToMain =>
+      _levelsLoaded && _state != null && currentLevel == null;
+
+  /// True while [addToMainPlaylist] runs.
+  bool get addingToMain => _addingToMain;
 
   /// Estimated position now.
   Duration get position => _state?.positionAt(_clock()) ?? Duration.zero;
@@ -135,11 +149,30 @@ class PlayerViewModel extends ChangeNotifier {
     };
   }
 
+  /// Adds the current track to the main playlist. When the sync writes it,
+  /// the levels stream gives it level 1 and the stars become enabled.
+  Future<String?> addToMainPlaylist() async {
+    final state = _state;
+    if (state == null || _addingToMain || !canAddToMain) return null;
+    _addingToMain = true;
+    notifyListeners();
+
+    final result = await _library.addToMain(state.trackUri);
+
+    _addingToMain = false;
+    notifyListeners();
+    return switch (result) {
+      Ok() => null,
+      Error() => 'Could not add the track to the main playlist.',
+    };
+  }
+
   void _onLoginChanged() {
     if (_loggedIn.value) {
       _subscription ??= _playback.state.listen(_setState);
       _levelsSubscription ??= _levels.watchLevels().listen((levels) {
         _levelsById = levels;
+        _levelsLoaded = true;
         notifyListeners();
       });
     } else {
@@ -148,6 +181,7 @@ class PlayerViewModel extends ChangeNotifier {
       _subscription = null;
       _levelsSubscription = null;
       _levelsById = const {};
+      _levelsLoaded = false;
       _setState(null);
     }
   }

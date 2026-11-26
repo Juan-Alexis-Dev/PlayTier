@@ -1,64 +1,80 @@
-// Not named *_test.dart on purpose: `flutter test` fails to compile tests
-// that import package:drift/native.dart (see docs/project-status.md §3).
-// Rename back to library_repository_test.dart once that is fixed.
-
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:playtier/data/services/spotify/dto/spotify_tokens.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:playtier/data/repositories/library_repository.dart';
+import 'package:playtier/data/repositories/settings_repository.dart';
+import 'package:playtier/data/services/local/app_database.dart';
+import 'package:playtier/data/services/spotify/spotify_api_service.dart';
+import 'package:playtier/domain/models/result.dart';
+
+class MockApi extends Mock implements SpotifyApiService {}
+
+class MockSettings extends Mock implements SettingsRepository {}
 
 void main() {
-  final now = DateTime(2026, 1, 1, 12);
+  late AppDatabase db;
+  late MockApi api;
+  late MockSettings settings;
+  late LibraryRepository repo;
 
-  test('fromTokenResponse computes the expiry time', () {
-    final tokens = SpotifyTokens.fromTokenResponse(
-      {'access_token': 'a', 'refresh_token': 'r', 'expires_in': 3600},
-      now: now,
-    );
+  setUpAll(() => registerFallbackValue(<String>[]));
 
-    expect(tokens.accessToken, 'a');
-    expect(tokens.refreshToken, 'r');
-    expect(tokens.expiresAt, DateTime(2026, 1, 1, 13));
+  setUp(() {
+    db = AppDatabase(NativeDatabase.memory());
+    api = MockApi();
+    settings = MockSettings();
+    repo = LibraryRepository(api: api, db: db, settings: settings);
+
+    when(settings.getMainPlaylistId).thenAnswer((_) async => 'main1');
+    when(() => api.addPlaylistItems(any(), any())).thenAnswer((_) async {});
+    // The sync after adding is not under test here; it fails quietly.
+    when(() => api.getPlaylistInfo(any())).thenThrow(Exception('offline'));
   });
+  tearDown(() => db.close());
 
-  test('a refresh response without refresh_token keeps the previous one', () {
-    final tokens = SpotifyTokens.fromTokenResponse(
-      {'access_token': 'a2', 'expires_in': 3600},
-      previousRefreshToken: 'r1',
-      now: now,
-    );
+  group('addToMain', () {
+    test('adds the track to the main playlist and syncs', () async {
+      final result = await repo.addToMain('spotify:track:t1');
 
-    expect(tokens.refreshToken, 'r1');
-  });
+      expect(result, isA<Ok<void>>());
+      verify(() => api.addPlaylistItems('main1', ['spotify:track:t1']))
+          .called(1);
+      verify(() => api.getPlaylistInfo('main1')).called(1);
+    });
 
-  test('a response without any refresh token throws', () {
-    expect(
-      () => SpotifyTokens.fromTokenResponse(
-        {'access_token': 'a', 'expires_in': 3600},
-      ),
-      throwsFormatException,
-    );
-  });
+    test('a failed sync after adding is still ok', () async {
+      expect(await repo.addToMain('spotify:track:t1'), isA<Ok<void>>());
+    });
 
-  test('isExpired one minute before the real expiry', () {
-    final tokens = SpotifyTokens(
-      accessToken: 'a',
-      refreshToken: 'r',
-      expiresAt: now.add(const Duration(minutes: 5)),
-    );
+    test('does not add a track already in the main playlist', () async {
+      await db.into(db.tracks).insert(
+            TracksCompanion.insert(
+              id: 't1',
+              uri: 'spotify:track:t1',
+              name: 'Track',
+              albumId: 'album1',
+              albumName: 'Album',
+              durationMs: 180000,
+              position: 0,
+            ),
+          );
 
-    expect(tokens.isExpired(now), isFalse);
-    expect(tokens.isExpired(now.add(const Duration(minutes: 4))), isTrue);
-  });
+      expect(await repo.addToMain('spotify:track:t1'), isA<Ok<void>>());
+      verifyNever(() => api.addPlaylistItems(any(), any()));
+    });
 
-  test('toJson and fromJson round-trip', () {
-    final tokens = SpotifyTokens(
-      accessToken: 'a',
-      refreshToken: 'r',
-      expiresAt: now,
-    );
-    final copy = SpotifyTokens.fromJson(tokens.toJson());
+    test('fails without a main playlist', () async {
+      when(settings.getMainPlaylistId).thenAnswer((_) async => null);
 
-    expect(copy.accessToken, 'a');
-    expect(copy.refreshToken, 'r');
-    expect(copy.expiresAt, now);
+      expect(await repo.addToMain('spotify:track:t1'), isA<Error<void>>());
+      verifyNever(() => api.addPlaylistItems(any(), any()));
+    });
+
+    test('a Spotify error is returned', () async {
+      when(() => api.addPlaylistItems(any(), any()))
+          .thenThrow(Exception('403'));
+
+      expect(await repo.addToMain('spotify:track:t1'), isA<Error<void>>());
+    });
   });
 }
