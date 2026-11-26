@@ -1,7 +1,7 @@
 # Music Program — Requirements (v0.4 draft)
 
 > Working name. Final name and logo pending (author's own design).
-> Last updated: 2026-11-19
+> Last updated: 2026-11-26
 
 ## 1. Overview
 
@@ -57,6 +57,8 @@ The app does **not** play audio itself. It reads the user's library through the 
 ### FR-3 Like levels
 - FR-3.1 Every track in the main playlist has a level from 1 to 5 (default 1). Shown as 5 stars/hearts; UI to raise/lower it.
 - FR-3.2 Levels are stored **locally on each device**. They are **not synced** between devices.
+- FR-3.3 The level can be set **without playing the track**: long press on a track in any track list (or its "More options" button on desktop) opens a sheet with cover, title and the 5 stars. Tracks not in the main playlist show the stars disabled (same rule as FR-12.4).
+- FR-3.4 Track lists show a small "★N" badge next to the duration for tracks with level 2–5.
 
 ### FR-4 Weighted shuffle
 - FR-4.1 Applies to any list: main playlist, virtual playlist, filter result, Liked page.
@@ -121,9 +123,8 @@ The app does **not** play audio itself. It reads the user's library through the 
 - FR-12.4 If the playing track is not in the main playlist (e.g. a Discover playlist), the stars are disabled and an "Add to main playlist" button is shown.
 - FR-12.5 Buttons: **Lyrics** (FR-13) and **About** (FR-14).
 
-### FR-13 Lyrics view — confirmed (v0.0b: GO)
+### FR-13 Lyrics view — conditional
 - FR-13.0 **Go/no-go:** this feature is built only if the lyrics spike (milestone v0.0b) passes: LRCLIB must have synced lyrics for **≥ 70%** of the author's main playlist and line highlighting must stay in sync on both Android and desktop. Otherwise the feature is dropped and the Lyrics button is removed.
-  **Result (2026-11-19): GO** — 97 of 99 tracks (98 %) have synced lyrics on LRCLIB (the other 2 are recent releases: plain-only or not found), and the highlight stayed in sync during full songs on Android (App Remote push) and Linux (polling + local timer). Coverage measured with `tool/lyrics_coverage.dart`; sync tested with `lib/lyrics_spike.dart` (branch `spike/playback`).
 - FR-13.1 Replaces the song view. Top: playlist name, track name, artist and a back button to the song view.
 - FR-13.2 Rest of the screen: lyrics only.
 - FR-13.3 Synced lyrics: the current line is highlighted with the theme's highlight color and auto-scrolled into view, following the playback position (FR-11.4). Word-level highlight only if the source provides it.
@@ -180,7 +181,7 @@ Navigation: bottom bar on phones, side navigation rail on desktop (Linux/Windows
 
 Shared screens:
 
-- **Playlist view** (Spotify-like layout). Header: cover, name, track count. Action row: **Play**, **Shuffle** (weighted), **Sort**, **New subplaylist** (opens filter panel → preview FR-8), **Add music** (FR-9.4/9.5), **More options**. Then the track list.
+- **Playlist view** (Spotify-like layout). Header: cover, name, track count. Action row: **Play**, **Shuffle** (weighted), **Sort**, **New subplaylist** (opens filter panel → preview FR-8), **Add music** (FR-9.4/9.5), **More options**. Then the track list (level badge FR-3.4; long press / "More options" per track → level sheet FR-3.3).
 - **Playlist preview** (FR-8).
 - **Now Playing** (FR-12), **Lyrics** (FR-13), **About** (FR-14).
 
@@ -228,11 +229,11 @@ Layout must be symmetric and responsive.
 | v0.0b | Lyrics spike: LRCLIB coverage over the main playlist + line sync test → go/no-go for FR-13 |
 | v0.1 | Auth, onboarding, sync + local cache, navigation shell, theme system with presets, playlist view |
 | v0.2 | Filters + sorting + preview + temporary/permanent playlists |
-| v0.3 | Like levels + weighted shuffle + Liked page + Now Playing view + mini-player |
+| v0.3 | Like levels (Now Playing and track lists) + weighted shuffle + Liked page + Now Playing view + mini-player |
 | v0.4 | Genres and Artists pages (virtual playlists) + genre enrichment |
 | v0.5 | Search + add music |
 | v0.6 | Discover |
-| v0.7 | About view + lyrics (v0.0b passed) + palette import/export |
+| v0.7 | About view + lyrics (if v0.0b passed) + palette import/export |
 
 ## 10. Open questions
 
@@ -259,5 +260,4 @@ Layout must be symmetric and responsive.
 | 2026-11-13 | Multiple preloaded dark palettes (green default, purple, blue, amber, coral) + JSON import/export. |
 | 2026-11-13 | Like levels are device-local; no cross-device sync, no backend. |
 | 2026-11-13 | Discover → Permanent creates a playlist only; tracks are not added to the main playlist. |
-| 2026-11-19 | **Lyrics spike (v0.0b): GO.** 98 % synced coverage on LRCLIB (97/99, threshold 70 %); line highlight in sync on Android and Linux. FR-13 stays in scope for v0.7. |
-| 2026-11-19 | Lyrics timing: Android uses App Remote push events; desktop polls `GET /me/player` every 1 s **only while the Lyrics view is open**; both interpolate the position with a local timer. |
+| 2026-11-26 | Levels can also be set from track lists without playing (long press / "More options" → level sheet), and lists show a "★N" badge for levels 2–5 (FR-3.3, FR-3.4). Added to v0.3 as issue 9; device selector moves to issue 10. |
