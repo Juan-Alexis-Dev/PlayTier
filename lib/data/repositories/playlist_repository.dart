@@ -55,6 +55,14 @@ class PlaylistRepository {
     });
   }
 
+  /// Appends [uris] to the playback playlist, after what is already there
+  /// (the next weighted shuffle round, FR-4.5).
+  Future<Result<void>> appendToPlaybackPlaylist(List<String> uris) {
+    return _guard(
+      () async => _api.addPlaylistItems(await _playbackId(), uris),
+    );
+  }
+
   /// Creates a real, private playlist in the user's Spotify account with
   /// [uris] in order (FR-8.2) and saves it as a permanent app playlist.
   Future<Result<PlaylistSummary>> createPermanent(

@@ -49,7 +49,11 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     db: database,
     settings: settingsRepository,
   );
-  final playbackRepository = PlaybackRepository(playbackService);
+  final playbackRepository = PlaybackRepository(
+    playbackService,
+    playlists: playlistRepository,
+    levels: levelsRepository,
+  );
 
   // App-wide ViewModels
   final settingsViewModel = SettingsViewModel(settingsRepository);

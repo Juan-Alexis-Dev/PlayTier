@@ -158,6 +158,38 @@ void main() {
     }
   });
 
+  group('avoidFirst', () {
+    test('the previous last track is never first', () {
+      final input = [for (var i = 0; i < 5; i++) 't$i'];
+      for (var seed = 0; seed < 100; seed++) {
+        final round = ids(
+          WeightedShuffle.generate(
+            [for (final id in input) track(id)],
+            levels: {'t0': 2},
+            avoidFirst: 't0',
+            random: Random(seed),
+          ),
+        );
+
+        expect(round.first, isNot('t0'));
+        expect(hasAdjacentCopies(round), isFalse);
+      }
+    });
+
+    test('is ignored when the copies would not fit otherwise', () {
+      final round = ids(
+        WeightedShuffle.generate(
+          [track('A'), track('B')],
+          levels: {'A': 5},
+          avoidFirst: 'A',
+          random: Random(1),
+        ),
+      );
+
+      expect(round, ['A', 'B', 'A']);
+    });
+  });
+
   test('the same seed gives the same round', () {
     final input = [for (var i = 0; i < 30; i++) 't$i'];
     final levels = {'t0': 3, 't5': 2};
