@@ -51,22 +51,49 @@ class PlaybackRepository {
   int _sessionId = 0;
   StreamSubscription<PlaybackState?>? _shuffleSub;
 
+  // What the app last started, to show "Playing from" (FR-12.1).
+  String? _contextName;
+  String? _contextId;
+
   /// Player state; null when nothing is playing.
   Stream<PlaybackState?> get state => _service.state;
 
   /// Whether a weighted shuffle session is running.
   bool get isShuffleActive => _shuffleTracks != null;
 
+  /// Name given to the last [playList] / [playShuffled] call, while
+  /// [state] still plays that context; otherwise null.
+  ///
+  /// Android does not report the context, so there the name is kept until
+  /// the app starts something else.
+  String? contextNameOf(PlaybackState state) {
+    final id = _contextId;
+    if (id == null) return null;
+    final uri = state.contextUri;
+    if (uri != null && !uri.endsWith(id)) return null;
+    return _contextName;
+  }
+
   /// Plays the Spotify playlist [contextUri] in order from [startIndex]
   /// (e.g. `spotify:playlist:<id>`). Ends any shuffle session.
-  Future<Result<void>> playList(String contextUri, {int startIndex = 0}) async {
+  /// [name] is shown as "Playing from" in Now Playing.
+  Future<Result<void>> playList(
+    String contextUri, {
+    int startIndex = 0,
+    String? name,
+  }) async {
     await stopShuffle();
-    return _run(() => _service.playContext(contextUri, startIndex: startIndex));
+    final result = await _run(
+      () => _service.playContext(contextUri, startIndex: startIndex),
+    );
+    if (result is Ok) _setContext(contextUri, name);
+    return result;
   }
 
   /// Starts a weighted shuffle of [tracks] (FR-4): writes the first round
   /// to the playback playlist and plays it from the start.
-  Future<Result<void>> playShuffled(List<Track> tracks) async {
+  /// [name] is shown as "Playing from" in Now Playing.
+  Future<Result<void>> playShuffled(List<Track> tracks, {String? name}) async {
     await stopShuffle();
     if (tracks.isEmpty) return const Result.ok(null);
 
@@ -83,6 +110,7 @@ class PlaybackRepository {
       }
 
       await _service.playContext(contextUri, startIndex: 0);
+      _setContext(contextUri, name);
 
       _sessionId++;
       _shuffleTracks = tracks;
@@ -119,6 +147,11 @@ class PlaybackRepository {
 
   Future<Result<void>> setRepeat(RepeatMode mode) =>
       _run(() => _service.setRepeat(mode));
+
+  void _setContext(String contextUri, String? name) {
+    _contextId = name == null ? null : contextUri.split(':').last;
+    _contextName = name;
+  }
 
   void _onState(PlaybackState? state) {
     if (state == null || _queue.isEmpty) return;

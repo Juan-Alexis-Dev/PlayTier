@@ -260,4 +260,61 @@ void main() {
       expect(repository.isShuffleActive, isTrue);
     });
   });
+
+  group('contextNameOf', () {
+    test('is the name given to playList while that context plays', () async {
+      await repository.playList('spotify:playlist:p1', name: 'Road trip');
+
+      expect(
+        repository.contextNameOf(
+          playing('spotify:track:A', contextUri: 'spotify:playlist:p1'),
+        ),
+        'Road trip',
+      );
+    });
+
+    test('is null when Spotify plays another context', () async {
+      await repository.playList('spotify:playlist:p1', name: 'Road trip');
+
+      expect(
+        repository.contextNameOf(
+          playing('spotify:track:A', contextUri: 'spotify:album:x'),
+        ),
+        isNull,
+      );
+    });
+
+    test('is kept when the context is unknown (Android)', () async {
+      await repository.playList('spotify:playlist:p1', name: 'Road trip');
+
+      expect(
+        repository.contextNameOf(playing('spotify:track:A', contextUri: null)),
+        'Road trip',
+      );
+    });
+
+    test('playShuffled sets the name for the playback playlist', () async {
+      await repository.playShuffled([track('A')], name: 'Main playlist');
+
+      expect(
+        repository.contextNameOf(playing('spotify:track:A')),
+        'Main playlist',
+      );
+    });
+
+    test('is not set when playback fails', () async {
+      when(
+        () => service.playContext(any(), startIndex: any(named: 'startIndex')),
+      ).thenThrow(const PlaybackException(PlaybackErrorKind.noDevice));
+
+      await repository.playList('spotify:playlist:p1', name: 'Road trip');
+
+      expect(
+        repository.contextNameOf(
+          playing('spotify:track:A', contextUri: 'spotify:playlist:p1'),
+        ),
+        isNull,
+      );
+    });
+  });
 }

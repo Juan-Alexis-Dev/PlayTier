@@ -192,8 +192,11 @@ class PlaylistViewModel extends ChangeNotifier {
 
     final contextUri = await _contextToPlay();
     if (contextUri != null) {
-      final result =
-          await _playback.playList(contextUri, startIndex: startIndex);
+      final result = await _playback.playList(
+        contextUri,
+        startIndex: startIndex,
+        name: _name,
+      );
       if (result case Error(:final error)) {
         _errorMessage = playbackErrorMessage(error);
       }
@@ -211,7 +214,7 @@ class PlaylistViewModel extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final result = await _playback.playShuffled(_tracks);
+    final result = await _playback.playShuffled(_tracks, name: _name);
     if (result case Error(:final error)) {
       _errorMessage = playbackErrorMessage(error);
     }

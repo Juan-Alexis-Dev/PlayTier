@@ -9,6 +9,7 @@ import '../features/browse/browse_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/onboarding/onboarding_view_model.dart';
+import '../features/player/now_playing_screen.dart';
 import '../features/playlist/playlist_screen.dart';
 import '../features/playlist/playlist_view_model.dart';
 import '../features/preview/preview_screen.dart';
@@ -35,6 +36,9 @@ class AppRoutes {
   static const genres = '/genres';
   static const artists = '/artists';
   static const settings = '/settings';
+
+  /// Full screen, above the tabs (opened from the mini-player).
+  static const nowPlaying = '/now-playing';
 }
 
 /// Builds the app's [GoRouter].
@@ -70,6 +74,10 @@ GoRouter createRouter({
           )..init(),
           child: const OnboardingScreen(),
         ),
+      ),
+      GoRoute(
+        path: AppRoutes.nowPlaying,
+        builder: (context, state) => const NowPlayingScreen(),
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) =>

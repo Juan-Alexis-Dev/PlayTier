@@ -79,7 +79,7 @@ void main() {
     test('writes the tracks in order, then plays that playlist', () async {
       when(() => playlists.writePlaybackPlaylist(any()))
           .thenAnswer((_) async => const Result.ok('spotify:playlist:pb'));
-      when(() => playback.playList(any()))
+      when(() => playback.playList(any(), name: any(named: 'name')))
           .thenAnswer((_) async => const Result.ok(null));
 
       final vm = create()..removeAt(0);
@@ -88,7 +88,8 @@ void main() {
       verify(() => playlists.writePlaybackPlaylist(
             ['spotify:track:2', 'spotify:track:3'],
           )).called(1);
-      verify(() => playback.playList('spotify:playlist:pb')).called(1);
+      verify(() => playback.playList('spotify:playlist:pb', name: 'Rock'))
+          .called(1);
       expect(vm.outcome, PreviewOutcome.played);
       expect(vm.errorMessage, isNull);
       expect(vm.busy, isFalse);
@@ -97,7 +98,7 @@ void main() {
     test('playback errors become a message', () async {
       when(() => playlists.writePlaybackPlaylist(any()))
           .thenAnswer((_) async => const Result.ok('spotify:playlist:pb'));
-      when(() => playback.playList(any())).thenAnswer(
+      when(() => playback.playList(any(), name: any(named: 'name'))).thenAnswer(
         (_) async => const Result.error(
           PlaybackException(PlaybackErrorKind.noDevice),
         ),
@@ -117,7 +118,9 @@ void main() {
       final vm = create();
       await vm.playTemporary();
 
-      verifyNever(() => playback.playList(any()));
+      verifyNever(
+        () => playback.playList(any(), name: any(named: 'name')),
+      );
       expect(vm.errorMessage, isNotNull);
     });
   });
@@ -142,7 +145,9 @@ void main() {
             'Rock',
             ['spotify:track:1', 'spotify:track:2', 'spotify:track:3'],
           )).called(1);
-      verifyNever(() => playback.playList(any()));
+      verifyNever(
+        () => playback.playList(any(), name: any(named: 'name')),
+      );
       expect(vm.outcome, PreviewOutcome.saved);
     });
 
