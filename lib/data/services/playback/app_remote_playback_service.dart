@@ -1,10 +1,15 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:spotify_sdk/spotify_sdk.dart' as sdk;
 
 import '../../../app/config.dart';
+import '../../../domain/models/playback_device.dart';
 import '../../../domain/models/playback_exception.dart';
 import '../../../domain/models/playback_state.dart';
+import '../spotify/spotify_api_exception.dart';
+import '../spotify/spotify_api_service.dart';
 import 'playback_service.dart';
 
 /// Android [PlaybackService] using the Spotify App Remote SDK (FR-11.3).
@@ -14,14 +19,26 @@ import 'playback_service.dart';
 /// - if the connection is refused, authorize once with
 ///   `getAccessToken(scope: 'app-remote-control')` from the foreground,
 ///   then connect again;
-/// - `switchToLocalDevice()` before playing, so music starts on the phone;
+/// - `switchToLocalDevice()` before playing, so music starts on the phone
+///   (skipped once the user picked a device, FR-11.2);
 /// - timeouts on every connection step, because the SDK can wait forever.
+///
+/// Devices are listed and switched through the Web API (Spotify Connect);
+/// the phone's Spotify app then forwards the App Remote commands to the
+/// chosen device.
 class AppRemotePlaybackService implements PlaybackService {
-  AppRemotePlaybackService(this._config, {DateTime Function()? clock})
-      : _clock = clock ?? DateTime.now;
+  AppRemotePlaybackService(
+    this._config,
+    this._api, {
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
 
   final AppConfig _config;
+  final SpotifyApiService _api;
   final DateTime Function() _clock;
+
+  /// True after [transferTo]: play where the user chose, not on the phone.
+  bool _keepDevice = false;
 
   static const _connectTimeout = Duration(seconds: 30);
   static const _authorizeTimeout = Duration(seconds: 90);
@@ -37,7 +54,7 @@ class AppRemotePlaybackService implements PlaybackService {
   @override
   Future<void> playContext(String contextUri, {int startIndex = 0}) {
     return _run(() async {
-      await sdk.SpotifySdk.switchToLocalDevice();
+      if (!_keepDevice) await sdk.SpotifySdk.switchToLocalDevice();
       // play() resumes when the context is already loaded; skipToIndex()
       // always starts it at the given track.
       await sdk.SpotifySdk.skipToIndex(
@@ -79,6 +96,18 @@ class AppRemotePlaybackService implements PlaybackService {
       );
 
   @override
+  Future<List<PlaybackDevice>> getDevices() async {
+    final devices = await _web(_api.getDevices);
+    return devices.map((d) => d.toDevice()).nonNulls.toList();
+  }
+
+  @override
+  Future<void> transferTo(String deviceId) async {
+    await _web(() => _api.transferPlayback(deviceId));
+    _keepDevice = true;
+  }
+
+  @override
   Future<void> dispose() async {
     await _playerSub?.cancel();
     await _controller.close();
@@ -96,6 +125,21 @@ class AppRemotePlaybackService implements PlaybackService {
       // The connection may have dropped (e.g. Spotify was closed).
       _connected = false;
       throw PlaybackException(PlaybackErrorKind.spotifyAppUnavailable, '$e');
+    }
+  }
+
+  /// Maps Web API errors to [PlaybackException].
+  Future<T> _web<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } on SpotifyApiException catch (e) {
+      debugPrint('Spotify Web API error: ${e.statusCode} ${e.message}');
+      throw PlaybackException(
+        e.statusCode == 404
+            ? PlaybackErrorKind.noDevice
+            : PlaybackErrorKind.rejected,
+        e.message,
+      );
     }
   }
 

@@ -7,6 +7,7 @@ import 'package:playtier/data/repositories/levels_repository.dart';
 import 'package:playtier/data/repositories/playback_repository.dart';
 import 'package:playtier/data/repositories/playlist_repository.dart';
 import 'package:playtier/data/services/playback/playback_service.dart';
+import 'package:playtier/domain/models/playback_device.dart';
 import 'package:playtier/domain/models/playback_exception.dart';
 import 'package:playtier/domain/models/playback_state.dart';
 import 'package:playtier/domain/models/result.dart';
@@ -315,6 +316,34 @@ void main() {
         ),
         isNull,
       );
+    });
+  });
+
+  group('devices', () {
+    const pc = PlaybackDevice(id: 'pc', name: 'PC', type: 'Computer');
+
+    test('getDevices returns the service devices', () async {
+      when(service.getDevices).thenAnswer((_) async => [pc]);
+
+      final result = await repository.getDevices();
+
+      expect((result as Ok<List<PlaybackDevice>>).value, [pc]);
+    });
+
+    test('getDevices errors become Result.error', () async {
+      when(service.getDevices)
+          .thenThrow(const PlaybackException(PlaybackErrorKind.rejected));
+
+      expect(await repository.getDevices(), isA<Error<List<PlaybackDevice>>>());
+    });
+
+    test('transferTo moves playback without ending the shuffle', () async {
+      when(() => service.transferTo(any())).thenAnswer((_) async {});
+      await repository.playShuffled([track('A'), track('B')]);
+
+      expect(await repository.transferTo('pc'), isA<Ok<void>>());
+      verify(() => service.transferTo('pc')).called(1);
+      expect(repository.isShuffleActive, isTrue);
     });
   });
 }

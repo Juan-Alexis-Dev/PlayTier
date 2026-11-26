@@ -9,7 +9,11 @@ String playbackErrorMessage(Exception error) {
       'No active Spotify device. Open Spotify and try again.',
     PlaybackErrorKind.spotifyAppUnavailable =>
       'Could not connect to the Spotify app. Open it and try again.',
-    PlaybackErrorKind.rejected =>
-      'Spotify rejected the request. A Premium account is required.',
+    // Spotify answers 403 for many reasons; only PREMIUM_REQUIRED means
+    // the account is the problem.
+    PlaybackErrorKind.rejected => error.message.contains('PREMIUM_REQUIRED')
+        ? 'Spotify rejected the request. A Premium account is required.'
+        : 'Spotify rejected the request. Make sure Spotify is open on that '
+            'device and try again.',
   };
 }

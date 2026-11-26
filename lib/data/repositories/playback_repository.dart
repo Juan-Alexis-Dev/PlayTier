@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import '../../domain/engines/weighted_shuffle.dart';
+import '../../domain/models/playback_device.dart';
 import '../../domain/models/playback_state.dart';
 import '../../domain/models/result.dart';
 import '../../domain/models/track.dart';
@@ -147,6 +148,20 @@ class PlaybackRepository {
 
   Future<Result<void>> setRepeat(RepeatMode mode) =>
       _run(() => _service.setRepeat(mode));
+
+  /// Devices where Spotify is open (FR-11.2).
+  Future<Result<List<PlaybackDevice>>> getDevices() async {
+    try {
+      return Result.ok(await _service.getDevices());
+    } on Exception catch (e) {
+      return Result.error(e);
+    }
+  }
+
+  /// Moves playback to [deviceId]. A shuffle session keeps going: the
+  /// context does not change.
+  Future<Result<void>> transferTo(String deviceId) =>
+      _run(() => _service.transferTo(deviceId));
 
   void _setContext(String contextUri, String? name) {
     _contextId = name == null ? null : contextUri.split(':').last;

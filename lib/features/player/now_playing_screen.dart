@@ -9,6 +9,7 @@ import '../../domain/models/playback_state.dart';
 import '../../shared/widgets/cover_image.dart';
 import '../../shared/widgets/level_stars.dart';
 import '../../shared/widgets/spotify_attribution.dart';
+import 'device_sheet.dart';
 import 'mini_player.dart';
 import 'player_view_model.dart';
 
@@ -165,6 +166,15 @@ class _Content extends StatelessWidget {
               runPlayerCommand(context, () => vm.seek(position)),
         ),
         _Controls(vm: vm, state: state),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            onPressed: () => DeviceSheet.show(context, vm),
+            icon: const Icon(Icons.devices),
+            // Android does not report the device name.
+            label: Text(state.deviceName ?? 'Choose device'),
+          ),
+        ),
       ],
     );
   }

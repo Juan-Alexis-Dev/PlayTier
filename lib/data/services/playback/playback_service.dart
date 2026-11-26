@@ -1,3 +1,4 @@
+import '../../../domain/models/playback_device.dart';
 import '../../../domain/models/playback_state.dart';
 
 /// Controls the official Spotify app (the app never plays audio itself).
@@ -23,6 +24,12 @@ abstract interface class PlaybackService {
   Future<void> previous();
   Future<void> seek(Duration position);
   Future<void> setRepeat(RepeatMode mode);
+
+  /// Devices where Spotify is open and can be controlled (FR-11.2).
+  Future<List<PlaybackDevice>> getDevices();
+
+  /// Moves playback to the device [deviceId] (e.g. the PC from the phone).
+  Future<void> transferTo(String deviceId);
 
   /// Stops timers and subscriptions.
   Future<void> dispose();
