@@ -27,6 +27,9 @@ class AppRoutes {
   static const home = '/home';
   static const mainPlaylist = '/home/main';
 
+  /// Main tracks with level 2–5 (FR-7).
+  static const liked = '/home/liked';
+
   /// Needs a `PlaylistDraft` as `extra`.
   static const preview = '/home/preview';
 
@@ -101,6 +104,20 @@ GoRouter createRouter({
                   path: 'main',
                   builder: (context, state) => ChangeNotifierProvider(
                     create: (context) => PlaylistViewModel(
+                      library: context.read(),
+                      levels: context.read(),
+                      playback: context.read(),
+                      playlists: context.read(),
+                      settings: context.read(),
+                    )..init(),
+                    child: const PlaylistScreen(),
+                  ),
+                ),
+                GoRoute(
+                  path: 'liked',
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) => PlaylistViewModel(
+                      isLiked: true,
                       library: context.read(),
                       levels: context.read(),
                       playback: context.read(),

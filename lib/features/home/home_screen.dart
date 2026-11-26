@@ -117,7 +117,7 @@ class _MainCards extends StatelessWidget {
               ),
               title: 'Liked',
               subtitle: '${vm.likedCount} tracks · levels 2–5',
-              // The Liked page arrives in v0.3.
+              onTap: () => context.go(AppRoutes.liked),
             ),
           ),
         ],
