@@ -19,10 +19,12 @@ import '../../shared/playback_error_message.dart';
 import '../filters/filter_view_model.dart';
 
 /// State of the playlist screen, for the main playlist (cached in the
-/// database) or a permanent playlist ([playlistId], read from Spotify).
+/// database), the Liked page ([isLiked], main tracks with level 2–5) or a
+/// permanent playlist ([playlistId], read from Spotify).
 ///
-/// [tracks] is the visible list: the playlist after [criteria] (FR-5.2)
-/// and [sort] (FR-5.4). A null [sort] keeps the playlist's own order.
+/// [tracks] is the visible list: the playlist after [shownLevels] (Liked
+/// only, FR-7.2), [criteria] (FR-5.2) and [sort] (FR-5.4). A null [sort]
+/// keeps the playlist's own order.
 class PlaylistViewModel extends ChangeNotifier {
   PlaylistViewModel({
     required this._library,
@@ -31,10 +33,18 @@ class PlaylistViewModel extends ChangeNotifier {
     required this._playlists,
     required this._settings,
     this.playlistId,
-  });
+    this.isLiked = false,
+  }) : assert(playlistId == null || !isLiked);
 
-  /// Spotify id of a permanent playlist; null for the main playlist.
+  /// Spotify id of a permanent playlist; null for the main playlist and
+  /// the Liked page.
   final String? playlistId;
+
+  /// The Liked page (FR-7): main tracks with level 2–5, each once.
+  final bool isLiked;
+
+  /// Levels the Liked page can show/hide.
+  static const likedLevels = {2, 3, 4, 5};
 
   final LibraryRepository _library;
   final LevelsRepository _levels;
@@ -51,8 +61,13 @@ class PlaylistViewModel extends ChangeNotifier {
   Map<String, int> _levelsById = const {};
   FilterCriteria _criteria = FilterCriteria.empty;
   SortOption? _sort;
+  Set<int> _shownLevels = likedLevels;
 
-  late String _name = isMain ? 'Main playlist' : 'Playlist';
+  late String _name = isLiked
+      ? 'Liked'
+      : isMain
+          ? 'Main playlist'
+          : 'Playlist';
   String? _coverUrl;
   bool _loaded = false;
   bool _syncing = false;
@@ -62,13 +77,20 @@ class PlaylistViewModel extends ChangeNotifier {
   /// Visible tracks (filtered and sorted).
   List<Track> get tracks => _tracks;
 
-  /// Every track of the playlist, before filters.
-  int get totalCount => _allTracks.length;
+  /// Every track of the playlist (Liked: every liked track), before
+  /// filters.
+  int get totalCount => _baseTracks.length;
 
   FilterCriteria get criteria => _criteria;
   SortOption? get sort => _sort;
 
-  bool get isMain => playlistId == null;
+  bool get isMain => playlistId == null && !isLiked;
+
+  /// Main playlist and Liked page come from the database.
+  bool get _fromDatabase => playlistId == null;
+
+  /// Liked page: levels currently shown (all of 2–5 by default).
+  Set<int> get shownLevels => _shownLevels;
 
   /// True when filters or a custom order change what is shown.
   bool get isCustomized => _criteria.isNotEmpty || _sort != null;
@@ -97,7 +119,7 @@ class PlaylistViewModel extends ChangeNotifier {
   /// Permanent: reads the playlist from Spotify. Genres and levels always
   /// come from the database.
   Future<void> init() async {
-    if (isMain) {
+    if (_fromDatabase) {
       _subscriptions.addAll([
         _library.watchTracks().listen((tracks) {
           _allTracks = tracks;
@@ -126,7 +148,7 @@ class PlaylistViewModel extends ChangeNotifier {
 
   /// A view model for the filter sheet, starting from the current filters.
   FilterViewModel createFilterViewModel() => FilterViewModel(
-        tracks: _allTracks,
+        tracks: _baseTracks,
         genresByArtist: _genresByArtist,
         artistNames: _artistNames,
         levels: _levelsById,
@@ -135,14 +157,15 @@ class PlaylistViewModel extends ChangeNotifier {
 
   /// The visible list as a draft for the preview screen, named after the
   /// active filters (FR-8.1).
-  PlaylistDraft createDraft() => PlaylistDraft(
-        name: PlaylistNameGenerator.generate(
-          _criteria,
-          artistNames: _artistNames,
-          albumNames: {for (final t in _allTracks) t.albumId: t.albumName},
-        ),
-        tracks: _tracks,
-      );
+  PlaylistDraft createDraft() {
+    final name = PlaylistNameGenerator.generate(
+      _criteria,
+      artistNames: _artistNames,
+      albumNames: {for (final t in _allTracks) t.albumId: t.albumName},
+    );
+    final fallback = isLiked && name == PlaylistNameGenerator.fallback;
+    return PlaylistDraft(name: fallback ? 'Liked' : name, tracks: _tracks);
+  }
 
   void setFilters(FilterCriteria criteria) {
     _criteria = criteria;
@@ -150,6 +173,16 @@ class PlaylistViewModel extends ChangeNotifier {
   }
 
   void clearFilters() => setFilters(FilterCriteria.empty);
+
+  /// Liked page: shows or hides the tracks of [level] (2–5). Only changes
+  /// what is shown (FR-7.2).
+  void toggleLevel(int level) {
+    if (!likedLevels.contains(level)) return;
+    final levels = {..._shownLevels};
+    if (!levels.remove(level)) levels.add(level);
+    _shownLevels = levels;
+    _refresh();
+  }
 
   /// Null goes back to the playlist's own order.
   void setSort(SortOption? sort) {
@@ -165,12 +198,12 @@ class PlaylistViewModel extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    if (isMain) {
+    if (_fromDatabase) {
       final result = await _library.syncIfChanged();
       if (result case Error()) {
         _errorMessage = 'Could not sync with Spotify. Showing saved data.';
       }
-      await _loadInfo();
+      if (isMain) await _loadInfo();
     } else {
       await _loadPermanent(playlistId!);
     }
@@ -224,8 +257,9 @@ class PlaylistViewModel extends ChangeNotifier {
   }
 
   /// Context URI to play, or null (with [_errorMessage] set) on failure.
+  /// The Liked page has no Spotify playlist, so it always writes the list.
   Future<String?> _contextToPlay() async {
-    if (!isCustomized) {
+    if (!isCustomized && !isLiked) {
       final id = playlistId ?? await _settings.getMainPlaylistId();
       return id == null ? null : 'spotify:playlist:$id';
     }
@@ -240,9 +274,23 @@ class PlaylistViewModel extends ChangeNotifier {
     }
   }
 
+  /// The playlist before any filter. Liked: main tracks with level 2–5.
+  List<Track> get _baseTracks => isLiked
+      ? [
+          for (final t in _allTracks)
+            if ((_levelsById[t.id] ?? 1) >= 2) t,
+        ]
+      : _allTracks;
+
   void _refresh() {
+    final base = isLiked
+        ? [
+            for (final t in _baseTracks)
+              if (_shownLevels.contains(_levelsById[t.id])) t,
+          ]
+        : _allTracks;
     final filtered = FilterEngine.apply(
-      _allTracks,
+      base,
       _criteria,
       genresByArtist: _genresByArtist,
       levels: _levelsById,

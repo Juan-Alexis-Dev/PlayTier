@@ -7,6 +7,7 @@ import '../filters/filter_sheet.dart';
 import 'playlist_view_model.dart';
 import 'widgets/action_row.dart';
 import 'widgets/active_filters_bar.dart';
+import 'widgets/level_filter_bar.dart';
 import 'widgets/playlist_header.dart';
 import 'widgets/sort_sheet.dart';
 import 'widgets/track_tile.dart';
@@ -68,6 +69,14 @@ class PlaylistScreen extends StatelessWidget {
                     : () => _openFilters(context, vm),
               ),
             ),
+            if (vm.isLiked && vm.totalCount > 0)
+              SliverToBoxAdapter(
+                child: LevelFilterBar(
+                  levels: PlaylistViewModel.likedLevels,
+                  shown: vm.shownLevels,
+                  onToggle: vm.toggleLevel,
+                ),
+              ),
             if (vm.isCustomized)
               SliverToBoxAdapter(
                 child: ActiveFiltersBar(
@@ -103,10 +112,12 @@ class PlaylistScreen extends StatelessWidget {
                 child: Center(
                   child: !vm.loaded || vm.syncing
                       ? const CircularProgressIndicator()
-                      : Text(
-                          vm.totalCount == 0
-                              ? 'This playlist has no playable tracks.'
-                              : 'No tracks match these filters.',
+                      : Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            _emptyMessage(vm),
+                            textAlign: TextAlign.center,
+                          ),
                         ),
                 ),
               )
@@ -125,6 +136,13 @@ class PlaylistScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static String _emptyMessage(PlaylistViewModel vm) {
+    if (vm.totalCount > 0) return 'No tracks match these filters.';
+    return vm.isLiked
+        ? 'No liked tracks yet. Give a track 2 or more stars in Now Playing.'
+        : 'This playlist has no playable tracks.';
   }
 
   Future<void> _openFilters(BuildContext context, PlaylistViewModel vm) async {

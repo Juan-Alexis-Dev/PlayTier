@@ -162,6 +162,108 @@ void main() {
     });
   });
 
+  group('Liked page', () {
+    final tracks = [
+      track('l1', 'a'),
+      track('l2', 'a'),
+      track('l3', 'a'),
+      track('l4', 'a'),
+    ];
+
+    setUp(() {
+      when(library.watchTracks).thenAnswer((_) => Stream.value(tracks));
+      when(library.watchArtistNames)
+          .thenAnswer((_) => Stream.value(const {'a': 'Muse'}));
+      when(() => library.syncIfChanged())
+          .thenAnswer((_) async => const Result.ok(false));
+      // l1 has no row (level 1), l2 is level 1, l3 is 2, l4 is 5.
+      when(levels.watchLevels).thenAnswer(
+        (_) => Stream.value(const {'l2': 1, 'l3': 2, 'l4': 5}),
+      );
+      when(() => playlists.writePlaybackPlaylist(any()))
+          .thenAnswer((_) async => const Result.ok('spotify:playlist:pb'));
+    });
+
+    Future<PlaylistViewModel> liked() async {
+      final vm = PlaylistViewModel(
+        isLiked: true,
+        library: library,
+        levels: levels,
+        playback: playback,
+        playlists: playlists,
+        settings: settings,
+      );
+      await vm.init();
+      return vm;
+    }
+
+    test('shows only main tracks with level 2–5', () async {
+      final vm = await liked();
+
+      expect(vm.isLiked, isTrue);
+      expect(vm.isMain, isFalse);
+      expect(vm.name, 'Liked');
+      expect(vm.tracks.map((t) => t.id), ['l3', 'l4']);
+      expect(vm.totalCount, 2);
+      verifyNever(library.getMainPlaylistInfo);
+    });
+
+    test('the level filter only shows or hides tracks', () async {
+      final vm = await liked();
+
+      vm.toggleLevel(5);
+      expect(vm.tracks.map((t) => t.id), ['l3']);
+      expect(vm.shownLevels, {2, 3, 4});
+      expect(vm.totalCount, 2);
+      expect(vm.isCustomized, isFalse);
+
+      vm.toggleLevel(5);
+      expect(vm.tracks.map((t) => t.id), ['l3', 'l4']);
+    });
+
+    test('levels outside 2–5 cannot be toggled', () async {
+      final vm = await liked();
+
+      vm.toggleLevel(1);
+      expect(vm.shownLevels, PlaylistViewModel.likedLevels);
+    });
+
+    test('Play writes the visible list (there is no Liked playlist)',
+        () async {
+      final vm = await liked();
+      await vm.play();
+
+      verify(
+        () => playlists.writePlaybackPlaylist(
+          ['spotify:track:l3', 'spotify:track:l4'],
+        ),
+      ).called(1);
+      verify(() => playback.playList('spotify:playlist:pb', name: 'Liked'))
+          .called(1);
+      verifyNever(settings.getMainPlaylistId);
+    });
+
+    test('Shuffle uses the shown tracks (weights come from levels)',
+        () async {
+      when(() => playback.playShuffled(any(), name: any(named: 'name')))
+          .thenAnswer((_) async => const Result.ok(null));
+      final vm = await liked();
+      vm.toggleLevel(2);
+
+      await vm.shuffle();
+
+      final shuffled = verify(
+        () => playback.playShuffled(captureAny(), name: 'Liked'),
+      ).captured.single as List<Track>;
+      expect(shuffled.map((t) => t.id), ['l4']);
+    });
+
+    test('a draft without filters is named Liked', () async {
+      final vm = await liked();
+      expect(vm.createDraft().name, 'Liked');
+    });
+  });
+
   test('a load error shows a message and an empty list', () async {
     when(() => playlists.getPlaylistContent('perm1'))
         .thenAnswer((_) async => Result.error(Exception('offline')));
