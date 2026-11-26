@@ -17,6 +17,7 @@ import '../data/services/playback/playback_service.dart';
 import '../data/services/spotify/spotify_api_service.dart';
 import '../data/services/spotify/spotify_auth_service.dart';
 import '../data/services/spotify/spotify_http_client.dart';
+import '../features/player/player_view_model.dart';
 import '../features/settings/settings_view_model.dart';
 import 'config.dart';
 
@@ -57,9 +58,14 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
 
   // App-wide ViewModels
   final settingsViewModel = SettingsViewModel(settingsRepository);
+  final playerViewModel = PlayerViewModel(
+    playback: playbackRepository,
+    loggedIn: authRepository.isLoggedIn,
+  );
 
   await authRepository.init();
   await settingsViewModel.load();
+  playerViewModel.init();
 
   return [
     Provider.value(value: database),
@@ -70,5 +76,6 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     Provider.value(value: levelsRepository),
     Provider.value(value: playbackRepository),
     ChangeNotifierProvider.value(value: settingsViewModel),
+    ChangeNotifierProvider.value(value: playerViewModel),
   ];
 }

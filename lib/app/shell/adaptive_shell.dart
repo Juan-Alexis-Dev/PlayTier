@@ -1,9 +1,11 @@
-// Bottom bar on phones, NavigationRail on desktop; hosts the mini-player.
 import 'package:material_ui/material_ui.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/player/mini_player.dart';
+
 /// Hosts the 5 tabs: bottom bar on narrow screens, navigation rail on wide
-/// ones. The mini-player is added here in v0.3.
+/// ones, plus the [MiniPlayer] (above the bar on phones, along the bottom
+/// on desktop).
 class AdaptiveShell extends StatelessWidget {
   const AdaptiveShell({super.key, required this.navigationShell});
 
@@ -58,21 +60,28 @@ class AdaptiveShell extends StatelessWidget {
             Expanded(child: navigationShell),
           ],
         ),
+        bottomNavigationBar: const MiniPlayer(),
       );
     }
 
     return Scaffold(
       body: navigationShell,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: index,
-        onDestinationSelected: _onSelect,
-        destinations: [
-          for (final d in _destinations)
-            NavigationDestination(
-              icon: Icon(d.icon),
-              selectedIcon: Icon(d.selected),
-              label: d.label,
-            ),
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const MiniPlayer(),
+          NavigationBar(
+            selectedIndex: index,
+            onDestinationSelected: _onSelect,
+            destinations: [
+              for (final d in _destinations)
+                NavigationDestination(
+                  icon: Icon(d.icon),
+                  selectedIcon: Icon(d.selected),
+                  label: d.label,
+                ),
+            ],
+          ),
         ],
       ),
     );
