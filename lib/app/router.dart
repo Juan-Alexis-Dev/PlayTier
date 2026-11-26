@@ -27,7 +27,10 @@ class AppRoutes {
   static const mainPlaylist = '/home/main';
 
   /// Needs a `PlaylistDraft` as `extra`.
-  static const preview = '/home/main/preview';
+  static const preview = '/home/preview';
+
+  ///A permanent playlist or one of the user's own Spotify playlists.
+  static String playlist(String id) => '/home/playlist/$id';
   static const search = '/search';
   static const genres = '/genres';
   static const artists = '/artists';
@@ -98,25 +101,35 @@ GoRouter createRouter({
                     )..init(),
                     child: const PlaylistScreen(),
                   ),
-                  routes: [
-                    GoRoute(
-                      path: 'preview',
-                      // No draft (e.g. a restored route): back to the list.
-                      redirect: (context, state) =>
-                          state.extra is PlaylistDraft
-                              ? null
-                              : AppRoutes.mainPlaylist,
-                      builder: (context, state) => ChangeNotifierProvider(
-                        create: (context) => PreviewViewModel(
-                          draft: state.extra! as PlaylistDraft,
-                          library: context.read(),
-                          playback: context.read(),
-                          playlists: context.read(),
-                        )..init(),
-                        child: const PreviewScreen(),
-                      ),
-                    ),
-                  ],
+                ),
+                GoRoute(
+                  path: 'playlist/:id',
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) => PlaylistViewModel(
+                      playlistId: state.pathParameters['id'],
+                      library: context.read(),
+                      levels: context.read(),
+                      playback: context.read(),
+                      playlists: context.read(),
+                      settings: context.read(),
+                    )..init(),
+                    child: const PlaylistScreen(),
+                  ),
+                ),
+                GoRoute(
+                  path: 'preview',
+                  // No draft (e.g. a restored route): back to Home.
+                  redirect: (context, state) =>
+                      state.extra is PlaylistDraft ? null : AppRoutes.home,
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) => PreviewViewModel(
+                      draft: state.extra! as PlaylistDraft,
+                      library: context.read(),
+                      playback: context.read(),
+                      playlists: context.read(),
+                    )..init(),
+                    child: const PreviewScreen(),
+                  ),
                 ),
               ],
             ),

@@ -18,7 +18,8 @@ import '../../domain/models/track.dart';
 import '../../shared/playback_error_message.dart';
 import '../filters/filter_view_model.dart';
 
-/// State of the playlist screen. For now: the main playlist only.
+/// State of the playlist screen, for the main playlist (cached in the
+/// database) or a permanent playlist ([playlistId], read from Spotify).
 ///
 /// [tracks] is the visible list: the playlist after [criteria] (FR-5.2)
 /// and [sort] (FR-5.4). A null [sort] keeps the playlist's own order.
@@ -29,7 +30,11 @@ class PlaylistViewModel extends ChangeNotifier {
     required this._playback,
     required this._playlists,
     required this._settings,
+    this.playlistId,
   });
+
+  /// Spotify id of a permanent playlist; null for the main playlist.
+  final String? playlistId;
 
   final LibraryRepository _library;
   final LevelsRepository _levels;
@@ -47,7 +52,7 @@ class PlaylistViewModel extends ChangeNotifier {
   FilterCriteria _criteria = FilterCriteria.empty;
   SortOption? _sort;
 
-  String _name = 'Main playlist';
+  late String _name = isMain ? 'Main playlist' : 'Playlist';
   String? _coverUrl;
   bool _loaded = false;
   bool _syncing = false;
@@ -63,13 +68,15 @@ class PlaylistViewModel extends ChangeNotifier {
   FilterCriteria get criteria => _criteria;
   SortOption? get sort => _sort;
 
+  bool get isMain => playlistId == null;
+
   /// True when filters or a custom order change what is shown.
   bool get isCustomized => _criteria.isNotEmpty || _sort != null;
 
   String get name => _name;
   String? get coverUrl => _coverUrl;
 
-  /// False until the database emitted the first list.
+  /// False until the first list arrived.
   bool get loaded => _loaded;
   bool get syncing => _syncing;
 
@@ -86,18 +93,24 @@ class PlaylistViewModel extends ChangeNotifier {
       .whereType<String>()
       .join(', ');
 
-  /// Listens to the database and checks Spotify for changes.
+  /// Main: listens to the database and checks Spotify for changes.
+  /// Permanent: reads the playlist from Spotify. Genres and levels always
+  /// come from the database.
   Future<void> init() async {
+    if (isMain) {
+      _subscriptions.addAll([
+        _library.watchTracks().listen((tracks) {
+          _allTracks = tracks;
+          _loaded = true;
+          _refresh();
+        }),
+        _library.watchArtistNames().listen((names) {
+          _artistNames = names;
+          _refresh();
+        }),
+      ]);
+    }
     _subscriptions.addAll([
-      _library.watchTracks().listen((tracks) {
-        _allTracks = tracks;
-        _loaded = true;
-        _refresh();
-      }),
-      _library.watchArtistNames().listen((names) {
-        _artistNames = names;
-        _refresh();
-      }),
       _library.watchArtistGenres().listen((genres) {
         _genresByArtist = genres;
         _refresh();
@@ -107,7 +120,7 @@ class PlaylistViewModel extends ChangeNotifier {
         _refresh();
       }),
     ]);
-    await _loadInfo();
+    if (isMain) await _loadInfo();
     await sync();
   }
 
@@ -144,19 +157,23 @@ class PlaylistViewModel extends ChangeNotifier {
     _refresh();
   }
 
-  /// Syncs only if the playlist changed in Spotify; the database streams
-  /// then update the list.
+  /// Main: syncs only if the playlist changed in Spotify; the database
+  /// streams then update the list. Permanent: reads it again.
   Future<void> sync() async {
     if (_syncing) return;
     _syncing = true;
     _errorMessage = null;
     notifyListeners();
 
-    final result = await _library.syncIfChanged();
-    if (result case Error()) {
-      _errorMessage = 'Could not sync with Spotify. Showing saved data.';
+    if (isMain) {
+      final result = await _library.syncIfChanged();
+      if (result case Error()) {
+        _errorMessage = 'Could not sync with Spotify. Showing saved data.';
+      }
+      await _loadInfo();
+    } else {
+      await _loadPermanent(playlistId!);
     }
-    await _loadInfo();
 
     _syncing = false;
     notifyListeners();
@@ -189,7 +206,7 @@ class PlaylistViewModel extends ChangeNotifier {
   /// Context URI to play, or null (with [_errorMessage] set) on failure.
   Future<String?> _contextToPlay() async {
     if (!isCustomized) {
-      final id = await _settings.getMainPlaylistId();
+      final id = playlistId ?? await _settings.getMainPlaylistId();
       return id == null ? null : 'spotify:playlist:$id';
     }
     final result = await _playlists
@@ -220,6 +237,21 @@ class PlaylistViewModel extends ChangeNotifier {
             levels: _levelsById,
           );
     notifyListeners();
+  }
+
+  Future<void> _loadPermanent(String id) async {
+    final result = await _playlists.getPlaylistContent(id);
+    switch (result) {
+      case Ok(:final value):
+        _name = value.name;
+        _coverUrl = value.coverUrl;
+        _artistNames = value.artistNames;
+        _allTracks = value.tracks;
+        _refresh();
+      case Error():
+        _errorMessage = 'Could not load this playlist from Spotify.';
+    }
+    _loaded = true;
   }
 
   Future<void> _loadInfo() async {
