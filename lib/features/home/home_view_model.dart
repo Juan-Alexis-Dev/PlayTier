@@ -27,6 +27,7 @@ class HomeViewModel extends ChangeNotifier {
 
   StreamSubscription<int>? _trackCountSub;
   StreamSubscription<int>? _likedCountSub;
+  StreamSubscription<void>? _appPlaylistsSub;
 
   String _mainName = 'Main playlist';
   String? _mainCoverUrl;
@@ -57,6 +58,10 @@ class HomeViewModel extends ChangeNotifier {
       _likedCount = count;
       notifyListeners();
     });
+    // A permanent playlist saved from the preview appears without a manual
+    // refresh.
+    _appPlaylistsSub =
+        _playlists.watchAppPlaylistChanges().listen((_) => loadPlaylists());
     await _loadMainInfo();
     await refresh();
   }
@@ -114,6 +119,7 @@ class HomeViewModel extends ChangeNotifier {
   void dispose() {
     _trackCountSub?.cancel();
     _likedCountSub?.cancel();
+    _appPlaylistsSub?.cancel();
     super.dispose();
   }
 }

@@ -3,10 +3,19 @@ import 'package:drift/drift.dart';
 import '../../domain/models/home_playlists_option.dart';
 import '../../domain/models/playlist_summary.dart';
 import '../../domain/models/result.dart';
+import '../../domain/models/track.dart';
 import '../services/local/app_database.dart';
 import '../services/local/tables.dart';
 import '../services/spotify/spotify_api_exception.dart';
 import '../services/spotify/spotify_api_service.dart';
+
+/// Content of a playlist read from Spotify (not cached).
+typedef PlaylistContent = ({
+  String name,
+  String? coverUrl,
+  List<Track> tracks,
+  Map<String, String> artistNames,
+});
 
 /// User and app playlists: the user's Spotify playlists, the private
 /// playback playlist (FR-1.6) and permanent playlists created with the app.
@@ -68,6 +77,44 @@ class PlaylistRepository {
     });
   }
 
+  /// Name, cover and playable tracks of a Spotify playlist, in order.
+  ///
+  /// Used for permanent playlists, which are not cached like the main one.
+  Future<Result<PlaylistContent>> getPlaylistContent(String playlistId) {
+    return _guard(() async {
+      final info = await _api.getPlaylistInfo(playlistId);
+      final items = await _api.getPlaylistItems(playlistId);
+      return (
+        name: info.name,
+        coverUrl: info.imageUrl,
+        tracks: [
+          for (final item in items)
+            Track(
+              id: item.id,
+              uri: item.uri,
+              name: item.name,
+              artistIds: [for (final a in item.artists) a.id],
+              albumId: item.albumId,
+              albumName: item.albumName,
+              duration: Duration(milliseconds: item.durationMs),
+              releaseDate: item.releaseDate,
+              addedAt: item.addedAt,
+              coverUrl: item.coverUrl,
+            ),
+        ],
+        artistNames: {
+          for (final item in items)
+            for (final a in item.artists) a.id: a.name,
+        },
+      );
+    });
+  }
+
+  /// Emits after a playlist is created or removed in the app (e.g. a new
+  /// permanent playlist), so Home can reload its grid.
+  Stream<void> watchAppPlaylistChanges() =>
+      _db.select(_db.appPlaylists).watch().skip(1).map((_) {});
+
   /// Spotify playlists owned by the user (candidates for the main playlist).
   Future<Result<List<PlaylistSummary>>> getOwnedSpotifyPlaylists() async {
     try {
@@ -91,9 +138,14 @@ class PlaylistRepository {
 
   /// Playlists for the "Your playlists" grid in Home (FR-1.3).
   ///
-  /// Permanent playlists created with the app first (newest first); with
+  /// Permanent playlists created with the app first (newest first), with
+  /// their cover and track count from Spotify; with
   /// [HomePlaylistsOption.includeSpotify], then the user's other Spotify
   /// playlists, without the main playlist or app playlists.
+  ///
+  /// A permanent playlist that is no longer in the user's library (deleted
+  /// in Spotify) is hidden, but kept in the database. If Spotify cannot be
+  /// reached, permanent playlists are still shown from the database.
   Future<Result<List<PlaylistSummary>>> getHomePlaylists({
     required HomePlaylistsOption option,
     String? mainPlaylistId,
@@ -102,14 +154,41 @@ class PlaylistRepository {
       final appRows = await (_db.select(_db.appPlaylists)
             ..orderBy([(p) => OrderingTerm.desc(p.createdAt)]))
           .get();
-      final playlists = [
+      final permanentRows = [
         for (final row in appRows)
-          if (row.kind == AppPlaylistKind.permanent)
+          if (row.kind == AppPlaylistKind.permanent) row,
+      ];
+
+      final owned = await getOwnedSpotifyPlaylists();
+      final List<PlaylistSummary> spotify;
+      switch (owned) {
+        case Ok(:final value):
+          spotify = value;
+        case Error(:final error):
+          if (option == HomePlaylistsOption.includeSpotify) {
+            return Result.error(error);
+          }
+          return Result.ok([
+            for (final row in permanentRows)
+              PlaylistSummary(
+                id: row.id,
+                name: row.name,
+                trackCount: 0,
+                type: PlaylistType.permanent,
+              ),
+          ]);
+      }
+
+      final spotifyById = {for (final p in spotify) p.id: p};
+      final playlists = [
+        for (final row in permanentRows)
+          if (spotifyById[row.id] case final p?)
             PlaylistSummary(
               id: row.id,
-              name: row.name,
-              trackCount: 0, // Not stored yet (v0.2).
+              name: p.name,
+              trackCount: p.trackCount,
               type: PlaylistType.permanent,
+              coverUrl: p.coverUrl,
             ),
       ];
 
@@ -119,13 +198,7 @@ class PlaylistRepository {
           for (final row in appRows) row.id,
           ?mainPlaylistId,
         };
-        final result = await getOwnedSpotifyPlaylists();
-        switch (result) {
-          case Ok(:final value):
-            playlists.addAll(value.where((p) => !hiddenIds.contains(p.id)));
-          case Error(:final error):
-            return Result.error(error);
-        }
+        playlists.addAll(spotify.where((p) => !hiddenIds.contains(p.id)));
       }
       return Result.ok(playlists);
     } on Exception catch (e) {

@@ -181,7 +181,7 @@ class _PlaylistsGrid extends StatelessWidget {
             artwork: CoverImage(playlist.coverUrl, size: double.infinity),
             title: playlist.name,
             subtitle: _subtitle(playlist),
-            // Opening other playlists arrives in v0.2.
+            onTap: () => context.go(AppRoutes.playlist(playlist.id)),
           );
         },
       ),
