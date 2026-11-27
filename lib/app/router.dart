@@ -6,6 +6,7 @@ import '../data/repositories/auth_repository.dart';
 import '../domain/models/playlist_draft.dart';
 import '../features/home/home_view_model.dart';
 import '../features/browse/browse_screen.dart';
+import '../features/browse/browse_view_model.dart';
 import '../features/home/home_screen.dart';
 import '../features/onboarding/onboarding_screen.dart';
 import '../features/onboarding/onboarding_view_model.dart';
@@ -169,15 +170,23 @@ GoRouter createRouter({
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.genres,
-              builder: (context, state) =>
-                  const BrowseScreen(kind: BrowseKind.genres),
+              // Data source comes in the next issue (Genres/Artists tabs).
+              builder: (context, state) => ChangeNotifierProvider(
+                create: (context) =>
+                    BrowseViewModel(Stream.value(const []))..init(),
+                child: const BrowseScreen(kind: BrowseKind.genres),
+              ),
             ),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.artists,
-              builder: (context, state) =>
-                  const BrowseScreen(kind: BrowseKind.artists),
+              // Data source comes in the next issue (Genres/Artists tabs).
+              builder: (context, state) => ChangeNotifierProvider(
+                create: (context) =>
+                    BrowseViewModel(Stream.value(const []))..init(),
+                child: const BrowseScreen(kind: BrowseKind.artists),
+              ),
             ),
           ]),
           StatefulShellBranch(routes: [
