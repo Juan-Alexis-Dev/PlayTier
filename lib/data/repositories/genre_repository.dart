@@ -5,6 +5,7 @@ import '../../domain/models/result.dart';
 import '../services/lastfm/lastfm_service.dart';
 import '../services/local/app_database.dart';
 import '../services/local/tables.dart';
+import '../services/musicbrainz/musicbrainz_api_exception.dart';
 import '../services/musicbrainz/musicbrainz_service.dart';
 import '../services/spotify/spotify_api_service.dart';
 
@@ -40,9 +41,11 @@ class GenreRepository {
   /// Finds genres for every pending artist and saves them one by one, so
   /// the database streams update while it runs.
   ///
-  /// Returns how many artists were processed. Stops at the first error
-  /// (offline, rate limit); the artists already done stay cached and the
-  /// rest are retried next time. Calls while a run is active share it.
+  /// Returns how many artists were processed. If MusicBrainz is still
+  /// busy after its retries, that artist stays pending and the run goes on
+  /// with the next one. Any other error (offline, Spotify) stops the run;
+  /// the artists already done stay cached and the rest are retried next
+  /// time. Calls while a run is active share it.
   Future<Result<int>> enrichMissing() {
     return _running ??= _enrichMissing().whenComplete(() => _running = null);
   }
@@ -54,9 +57,14 @@ class GenreRepository {
           .get();
       var done = 0;
       for (final artist in pending) {
-        final found = await _find(artist.id, artist.name);
-        await _save(artist.id, found);
-        done++;
+        try {
+          final found = await _find(artist.id, artist.name);
+          await _save(artist.id, found);
+          done++;
+        } on MusicBrainzApiException {
+          // Server busy: leave it pending (genresFetchedAt stays null).
+          continue;
+        }
       }
       return Result.ok(done);
     } on Exception catch (e) {

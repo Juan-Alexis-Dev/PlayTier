@@ -25,7 +25,11 @@ import 'package:playtier/data/services/musicbrainz/musicbrainz_service.dart';
     return http.Response(body is String ? body : jsonEncode(body), status);
   });
   return (
-    api: MusicBrainzService(client, minInterval: minInterval),
+    api: MusicBrainzService(
+      client,
+      minInterval: minInterval,
+      retryBaseDelay: Duration.zero,
+    ),
     requests: requests,
     times: times,
   );
@@ -141,13 +145,33 @@ void main() {
       expect(await fake.api.getArtistGenres(_mbid), isEmpty);
     });
 
-    test('rate limited (503) throws', () async {
+    test('busy (503) is retried, then throws', () async {
       final fake = fakeApi('Service Unavailable', status: 503);
-      expect(
+      await expectLater(
         fake.api.getArtistGenres(_mbid),
         throwsA(isA<MusicBrainzApiException>()
             .having((e) => e.statusCode, 'statusCode', 503)),
       );
+      // First try + 3 retries.
+      expect(fake.requests, hasLength(4));
+    });
+
+    test('a 503 followed by a 200 succeeds', () async {
+      var calls = 0;
+      final client = MockClient((request) async {
+        calls++;
+        return calls == 1
+            ? http.Response('busy', 503)
+            : http.Response('{"genres": [{"name": "rock", "count": 1}]}', 200);
+      });
+      final api = MusicBrainzService(
+        client,
+        minInterval: Duration.zero,
+        retryBaseDelay: Duration.zero,
+      );
+
+      expect(await api.getArtistGenres(_mbid), [(name: 'rock', count: 1)]);
+      expect(calls, 2);
     });
   });
 
