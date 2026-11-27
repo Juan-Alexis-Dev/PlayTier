@@ -68,6 +68,34 @@ class SpotifyApiService {
     return SpotifyArtistDto.fromJson(json);
   }
 
+  /// Max results per search request in Development Mode (Feb 2026).
+  static const searchLimit = 10;
+
+  /// Playable tracks matching [query] (`GET /search?type=track`).
+  ///
+  /// [limit] is clamped to 1–[searchLimit]; use [offset] for more pages.
+  Future<List<SpotifyPlaylistItemDto>> searchTracks(
+    String query, {
+    int limit = searchLimit,
+    int offset = 0,
+  }) async {
+    final json = await _getJson(
+      Uri.parse('$_baseUrl/search').replace(queryParameters: {
+        'q': query,
+        'type': 'track',
+        'market': 'from_token',
+        'limit': '${limit.clamp(1, searchLimit)}',
+        'offset': '$offset',
+      }),
+    );
+    final tracks = json['tracks'] as Map<String, dynamic>? ?? const {};
+    return [
+      for (final item in tracks['items'] as List<dynamic>? ?? const [])
+        if (item is Map<String, dynamic>)
+          ?SpotifyPlaylistItemDto.tryParseTrack(item),
+    ];
+  }
+
   // ---------------------------------------------------------------------
   // Playlist writing.
   // ---------------------------------------------------------------------

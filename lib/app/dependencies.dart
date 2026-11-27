@@ -10,6 +10,7 @@ import '../data/repositories/levels_repository.dart';
 import '../data/repositories/library_repository.dart';
 import '../data/repositories/playback_repository.dart';
 import '../data/repositories/playlist_repository.dart';
+import '../data/repositories/search_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../data/services/lastfm/lastfm_service.dart';
 import '../data/services/local/app_database.dart';
@@ -66,6 +67,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     musicBrainz: musicBrainzService,
     lastFm: lastFmService,
   );
+  final searchRepository = SearchRepository(api: apiService, db: database);
   final playbackRepository = PlaybackRepository(
     playbackService,
     playlists: playlistRepository,
@@ -92,6 +94,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     Provider.value(value: playlistRepository),
     Provider.value(value: libraryRepository),
     Provider.value(value: genreRepository),
+    Provider.value(value: searchRepository),
     Provider.value(value: levelsRepository),
     Provider.value(value: playbackRepository),
     ChangeNotifierProvider.value(value: settingsViewModel),
