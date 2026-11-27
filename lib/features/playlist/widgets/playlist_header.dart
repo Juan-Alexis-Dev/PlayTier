@@ -1,9 +1,11 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../../shared/widgets/cover_image.dart';
+import '../../../shared/widgets/cover_mosaic.dart';
 
 /// Cover, name and "N tracks · duration". Side by side on wide screens,
-/// stacked and centered on narrow ones.
+/// stacked and centered on narrow ones. With [coverUrls] the cover is a
+/// mosaic (genre and artist playlists).
 class PlaylistHeader extends StatelessWidget {
   const PlaylistHeader({
     super.key,
@@ -11,12 +13,18 @@ class PlaylistHeader extends StatelessWidget {
     required this.trackCount,
     required this.totalDuration,
     this.coverUrl,
+    this.coverUrls = const [],
+    this.label = 'Playlist',
   });
 
   final String name;
   final int trackCount;
   final Duration totalDuration;
   final String? coverUrl;
+  final List<String> coverUrls;
+
+  /// Small text above the name ("Playlist", "Genre", "Artist").
+  final String label;
 
   static String _formatTotal(Duration d) {
     final hours = d.inHours;
@@ -32,16 +40,15 @@ class PlaylistHeader extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 600;
-        final cover = CoverImage(
-          coverUrl,
-          size: wide ? 192 : 160,
-          borderRadius: 8,
-        );
+        final size = wide ? 192.0 : 160.0;
+        final cover = coverUrls.isNotEmpty
+            ? CoverMosaic(coverUrls, size: size)
+            : CoverImage(coverUrl, size: size, borderRadius: 8);
         final texts = Column(
           crossAxisAlignment:
               wide ? CrossAxisAlignment.start : CrossAxisAlignment.center,
           children: [
-            Text('Playlist', style: textTheme.labelLarge),
+            Text(label, style: textTheme.labelLarge),
             const SizedBox(height: 4),
             Text(
               name,

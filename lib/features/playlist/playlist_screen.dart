@@ -57,12 +57,19 @@ class PlaylistScreen extends StatelessWidget {
               child: PlaylistHeader(
                 name: vm.name,
                 coverUrl: vm.coverUrl,
+                coverUrls: vm.coverUrls,
+                label: vm.genre != null
+                    ? 'Genre'
+                    : vm.artistId != null
+                        ? 'Artist'
+                        : 'Playlist',
                 trackCount: tracks.length,
                 totalDuration: vm.totalDuration,
               ),
             ),
             SliverToBoxAdapter(
               child: ActionRow(
+                showAddMusic: vm.canAddMusic,
                 onPlay: tracks.isEmpty || vm.starting ? null : vm.play,
                 onShuffle: tracks.isEmpty || vm.starting ? null : vm.shuffle,
                 onSort: vm.totalCount == 0
@@ -172,9 +179,13 @@ class PlaylistScreen extends StatelessWidget {
 
   static String _emptyMessage(PlaylistViewModel vm) {
     if (vm.totalCount > 0) return 'No tracks match these filters.';
-    return vm.isLiked
-        ? 'No liked tracks yet. Give a track 2 or more stars in Now Playing.'
-        : 'This playlist has no playable tracks.';
+    if (vm.isLiked) {
+      return 'No liked tracks yet. Give a track 2 or more stars in Now Playing.';
+    }
+    if (vm.genre != null || vm.artistId != null) {
+      return 'No tracks left here. They were removed from the main playlist.';
+    }
+    return 'This playlist has no playable tracks.';
   }
 
   Future<void> _openFilters(BuildContext context, PlaylistViewModel vm) async {

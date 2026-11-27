@@ -10,6 +10,7 @@ import '../../data/repositories/settings_repository.dart';
 import '../../domain/engines/filter_engine.dart';
 import '../../domain/engines/playlist_name_generator.dart';
 import '../../domain/engines/sort_engine.dart';
+import '../../domain/engines/virtual_playlists.dart';
 import '../../domain/models/filter_criteria.dart';
 import '../../domain/models/like_level.dart';
 import '../../domain/models/playlist_draft.dart';
@@ -20,7 +21,8 @@ import '../../shared/playback_error_message.dart';
 import '../filters/filter_view_model.dart';
 
 /// State of the playlist screen, for the main playlist (cached in the
-/// database), the Liked page ([isLiked], main tracks with level 2–5) or a
+/// database), the Liked page ([isLiked], main tracks with level 2–5), a
+/// genre or artist virtual playlist ([genre], [artistId], FR-6) or a
 /// permanent playlist ([playlistId], read from Spotify).
 ///
 /// [tracks] is the visible list: the playlist after [shownLevels] (Liked
@@ -35,14 +37,29 @@ class PlaylistViewModel extends ChangeNotifier {
     required this._settings,
     this.playlistId,
     this.isLiked = false,
-  }) : assert(playlistId == null || !isLiked);
+    this.genre,
+    this.artistId,
+  }) : assert(
+          (playlistId != null ? 1 : 0) +
+                  (isLiked ? 1 : 0) +
+                  (genre != null ? 1 : 0) +
+                  (artistId != null ? 1 : 0) <=
+              1,
+          'Only one kind of playlist',
+        );
 
   /// Spotify id of a permanent playlist; null for the main playlist and
-  /// the Liked page.
+  /// the virtual playlists.
   final String? playlistId;
 
   /// The Liked page (FR-7): main tracks with level 2–5, each once.
   final bool isLiked;
+
+  /// Genre virtual playlist (lower-case genre name, FR-6.1).
+  final String? genre;
+
+  /// Artist virtual playlist (Spotify artist id, FR-6.2).
+  final String? artistId;
 
   /// Levels the Liked page can show/hide.
   static const likedLevels = {2, 3, 4, 5};
@@ -68,7 +85,9 @@ class PlaylistViewModel extends ChangeNotifier {
       ? 'Liked'
       : isMain
           ? 'Main playlist'
-          : 'Playlist';
+          : genre != null
+              ? VirtualPlaylists.genreName(genre!)
+              : 'Playlist';
   String? _coverUrl;
   bool _loaded = false;
   bool _syncing = false;
@@ -85,9 +104,17 @@ class PlaylistViewModel extends ChangeNotifier {
   FilterCriteria get criteria => _criteria;
   SortOption? get sort => _sort;
 
-  bool get isMain => playlistId == null && !isLiked;
+  bool get isMain =>
+      playlistId == null && !isLiked && genre == null && artistId == null;
 
-  /// Main playlist and Liked page come from the database.
+  /// Liked, genre and artist playlists exist only in the app (no Spotify
+  /// playlist to play, nothing to add music to).
+  bool get isVirtual => isLiked || genre != null || artistId != null;
+
+  /// "Add music" is hidden in virtual playlists (FR-9.5).
+  bool get canAddMusic => !isVirtual;
+
+  /// Main and virtual playlists come from the database.
   bool get _fromDatabase => playlistId == null;
 
   /// Liked page: levels currently shown (all of 2–5 by default).
@@ -96,8 +123,24 @@ class PlaylistViewModel extends ChangeNotifier {
   /// True when filters or a custom order change what is shown.
   bool get isCustomized => _criteria.isNotEmpty || _sort != null;
 
-  String get name => _name;
+  /// Artist playlists use the artist's name once it is known.
+  String get name =>
+      artistId != null ? _artistNames[artistId] ?? 'Artist' : _name;
+
   String? get coverUrl => _coverUrl;
+
+  /// Genre and artist playlists: up to 4 covers of their tracks for a
+  /// mosaic (like their card); empty otherwise.
+  List<String> get coverUrls {
+    if (genre == null && artistId == null) return const [];
+    final urls = <String>[];
+    for (final track in _baseTracks) {
+      final url = track.coverUrl;
+      if (url != null && !urls.contains(url)) urls.add(url);
+      if (urls.length == VirtualPlaylists.maxCovers) break;
+    }
+    return urls;
+  }
 
   /// False until the first list arrived.
   bool get loaded => _loaded;
@@ -180,8 +223,8 @@ class PlaylistViewModel extends ChangeNotifier {
       artistNames: _artistNames,
       albumNames: {for (final t in _allTracks) t.albumId: t.albumName},
     );
-    final fallback = isLiked && name == PlaylistNameGenerator.fallback;
-    return PlaylistDraft(name: fallback ? 'Liked' : name, tracks: _tracks);
+    final fallback = isVirtual && name == PlaylistNameGenerator.fallback;
+    return PlaylistDraft(name: fallback ? this.name : name, tracks: _tracks);
   }
 
   void setFilters(FilterCriteria criteria) {
@@ -245,7 +288,7 @@ class PlaylistViewModel extends ChangeNotifier {
       final result = await _playback.playList(
         contextUri,
         startIndex: startIndex,
-        name: _name,
+        name: name,
       );
       if (result case Error(:final error)) {
         _errorMessage = playbackErrorMessage(error);
@@ -264,7 +307,7 @@ class PlaylistViewModel extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
-    final result = await _playback.playShuffled(_tracks, name: _name);
+    final result = await _playback.playShuffled(_tracks, name: name);
     if (result case Error(:final error)) {
       _errorMessage = playbackErrorMessage(error);
     }
@@ -274,9 +317,10 @@ class PlaylistViewModel extends ChangeNotifier {
   }
 
   /// Context URI to play, or null (with [_errorMessage] set) on failure.
-  /// The Liked page has no Spotify playlist, so it always writes the list.
+  /// Virtual playlists have no Spotify playlist, so they always write the
+  /// list.
   Future<String?> _contextToPlay() async {
-    if (!isCustomized && !isLiked) {
+    if (!isCustomized && !isVirtual) {
       final id = playlistId ?? await _settings.getMainPlaylistId();
       return id == null ? null : 'spotify:playlist:$id';
     }
@@ -292,12 +336,34 @@ class PlaylistViewModel extends ChangeNotifier {
   }
 
   /// The playlist before any filter. Liked: main tracks with level 2–5.
-  List<Track> get _baseTracks => isLiked
-      ? [
-          for (final t in _allTracks)
-            if ((_levelsById[t.id] ?? 1) >= 2) t,
-        ]
-      : _allTracks;
+  /// Genre: main tracks with an artist of that genre. Artist: main tracks
+  /// of that artist, featured included.
+  List<Track> get _baseTracks {
+    final genre = this.genre;
+    final artistId = this.artistId;
+    if (isLiked) {
+      return [
+        for (final t in _allTracks)
+          if ((_levelsById[t.id] ?? 1) >= 2) t,
+      ];
+    }
+    if (genre != null) {
+      return [
+        for (final t in _allTracks)
+          if (t.artistIds.any(
+            (id) => _genresByArtist[id]?.contains(genre) ?? false,
+          ))
+            t,
+      ];
+    }
+    if (artistId != null) {
+      return [
+        for (final t in _allTracks)
+          if (t.artistIds.contains(artistId)) t,
+      ];
+    }
+    return _allTracks;
+  }
 
   void _refresh() {
     final base = isLiked
@@ -305,7 +371,7 @@ class PlaylistViewModel extends ChangeNotifier {
             for (final t in _baseTracks)
               if (_shownLevels.contains(_levelsById[t.id])) t,
           ]
-        : _allTracks;
+        : _baseTracks;
     final filtered = FilterEngine.apply(
       base,
       _criteria,
