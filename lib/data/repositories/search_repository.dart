@@ -12,6 +12,9 @@ class SearchRepository {
   final SpotifyApiService _api;
   final AppDatabase _db;
 
+  /// Results per page. A full page means there may be more.
+  static const pageSize = SpotifyApiService.searchLimit;
+
   /// Searches Spotify for tracks matching [query].
   ///
   /// Each result says whether the track is already in the main playlist

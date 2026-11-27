@@ -15,6 +15,7 @@ class TrackTile extends StatelessWidget {
     this.onLongPress,
     this.onMore,
     this.onRemove,
+    this.action,
   });
 
   final Track track;
@@ -35,6 +36,9 @@ class TrackTile extends StatelessWidget {
 
   /// Shows a remove button next to the duration (preview screen).
   final VoidCallback? onRemove;
+
+  /// Extra widget after the duration (e.g. the "Add" button in Search).
+  final Widget? action;
 
   static String _formatDuration(Duration d) {
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -69,6 +73,7 @@ class TrackTile extends StatelessWidget {
               icon: const Icon(Icons.more_vert),
               onPressed: onMore,
             ),
+          ?action,
         ],
       ),
       onTap: onTap,
