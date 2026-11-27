@@ -2,16 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../domain/engines/virtual_playlists.dart';
+
 /// One card of the Browse grid (a genre or an artist virtual playlist).
-///
-/// [id] is the genre name or the artist id; [coverUrls] are the first
-/// track covers, for the mosaic.
-typedef BrowseItem = ({
-  String id,
-  String name,
-  int trackCount,
-  List<String> coverUrls,
-});
+typedef BrowseItem = VirtualPlaylist;
 
 /// State of the shared Browse screen (Genres and Artists tabs).
 ///

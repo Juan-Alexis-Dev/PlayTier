@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../domain/engines/virtual_playlists.dart';
 import '../../domain/models/result.dart';
 import '../../domain/models/track.dart';
 import '../services/local/app_database.dart';
@@ -21,34 +22,19 @@ class LibraryRepository {
 
   /// Tracks of the main playlist in playlist order. Emits again whenever
   /// a sync changes the database.
-  Stream<List<Track>> watchTracks() {
-    final query = _db.select(_db.tracks).join([
-      leftOuterJoin(
-        _db.trackArtists,
-        _db.trackArtists.trackId.equalsExp(_db.tracks.id),
-      ),
-    ])
-      ..orderBy([
-        OrderingTerm.asc(_db.tracks.position),
-        OrderingTerm.asc(_db.trackArtists.position),
-      ]);
+  Stream<List<Track>> watchTracks() =>
+      _tracksQuery().watch().map(_groupTracks);
 
-    return query.watch().map((rows) {
-      // One row per (track, artist): group them, keeping the order.
-      final tracks = <String, TrackRow>{};
-      final artistIds = <String, List<String>>{};
-      for (final row in rows) {
-        final track = row.readTable(_db.tracks);
-        tracks.putIfAbsent(track.id, () => track);
-        final ids = artistIds.putIfAbsent(track.id, () => []);
-        final link = row.readTableOrNull(_db.trackArtists);
-        if (link != null) ids.add(link.artistId);
-      }
-      return [
-        for (final track in tracks.values) _toTrack(track, artistIds[track.id]!),
-      ];
-    });
-  }
+  /// Genre virtual playlists (FR-6.1), most tracks first. Emits again
+  /// after every sync and every artist saved by genre enrichment.
+  Stream<List<VirtualPlaylist>> watchGenrePlaylists() => _watchLibrary(
+        (tracks, names, genres) => VirtualPlaylists.genres(tracks, genres),
+      );
+
+  /// Artist virtual playlists (FR-6.2), most tracks first.
+  Stream<List<VirtualPlaylist>> watchArtistPlaylists() => _watchLibrary(
+        (tracks, names, genres) => VirtualPlaylists.artists(tracks, names),
+      );
 
   /// Number of tracks in the main playlist.
   Stream<int> watchTrackCount() {
@@ -137,6 +123,73 @@ class LibraryRepository {
     } on Exception catch (e) {
       return Result.error(e);
     }
+  }
+
+  /// Tracks joined with their artist links, in playlist order.
+    JoinedSelectStatement<HasResultSet, dynamic> _tracksQuery() {
+    return _db.select(_db.tracks).join([
+      leftOuterJoin(
+        _db.trackArtists,
+        _db.trackArtists.trackId.equalsExp(_db.tracks.id),
+      ),
+    ])
+      ..orderBy([
+        OrderingTerm.asc(_db.tracks.position),
+        OrderingTerm.asc(_db.trackArtists.position),
+      ]);
+  }
+
+  /// One row per (track, artist): groups them, keeping the order.
+  List<Track> _groupTracks(List<TypedResult> rows) {
+    final tracks = <String, TrackRow>{};
+    final artistIds = <String, List<String>>{};
+    for (final row in rows) {
+      final track = row.readTable(_db.tracks);
+      tracks.putIfAbsent(track.id, () => track);
+      final ids = artistIds.putIfAbsent(track.id, () => []);
+      final link = row.readTableOrNull(_db.trackArtists);
+      if (link != null) ids.add(link.artistId);
+    }
+    return [
+      for (final track in tracks.values) _toTrack(track, artistIds[track.id]!),
+    ];
+  }
+
+  /// Reads tracks, artist names and genres now and again whenever one of
+  /// their tables changes, and maps them with [build].
+  Stream<T> _watchLibrary<T>(
+    T Function(
+      List<Track> tracks,
+      Map<String, String> artistNames,
+      Map<String, List<String>> genresByArtist,
+    ) build,
+  ) {
+    // A tiny query only used as a trigger: drift re-runs it (and emits)
+    // on every change to these tables. `asyncMap` keeps the order.
+    final trigger = _db.customSelect(
+      'SELECT 1',
+      readsFrom: {
+        _db.tracks,
+        _db.trackArtists,
+        _db.artists,
+        _db.artistGenres,
+      },
+    ).watch();
+
+    return trigger.asyncMap((_) async {
+      final tracks = _groupTracks(await _tracksQuery().get());
+      final artists = await _db.select(_db.artists).get();
+      final genreRows = await _db.select(_db.artistGenres).get();
+      final genres = <String, List<String>>{};
+      for (final row in genreRows) {
+        genres.putIfAbsent(row.artistId, () => []).add(row.genre);
+      }
+      return build(
+        tracks,
+        {for (final artist in artists) artist.id: artist.name},
+        genres,
+      );
+    });
   }
 
   static Track _toTrack(TrackRow row, List<String> artistIds) {
