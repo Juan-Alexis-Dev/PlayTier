@@ -13,6 +13,8 @@ class CoverMosaic extends StatelessWidget {
   });
 
   final List<String> urls;
+
+  /// Side length. Use `double.infinity` to fill the parent (e.g. a card).
   final double size;
   final double borderRadius;
 
@@ -25,12 +27,24 @@ class CoverMosaic extends StatelessWidget {
         borderRadius: borderRadius,
       );
     }
-    final half = size / 2;
+    if (!size.isFinite) {
+      // The 2×2 tiles need a real size: take it from the parent.
+      return LayoutBuilder(
+        builder: (context, constraints) => _mosaic(
+          constraints.biggest.shortestSide,
+        ),
+      );
+    }
+    return _mosaic(size);
+  }
+
+  Widget _mosaic(double side) {
+    final half = side / 2;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(borderRadius),
       child: SizedBox.square(
-        dimension: size,
+        dimension: side,
         child: Column(
           children: [
             for (var row = 0; row < 2; row++)

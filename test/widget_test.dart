@@ -71,6 +71,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.category_outlined));
     await tester.pumpAndSettle();
 
-    expect(find.text('Genres screen'), findsOneWidget);
+    // Hint of the Browse search bar.
+    expect(find.text('Search genres'), findsOneWidget);
   });
 }

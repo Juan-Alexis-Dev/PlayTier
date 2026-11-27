@@ -4,9 +4,10 @@ import 'package:provider/provider.dart';
 
 import '../../app/router.dart';
 import '../../domain/models/playlist_summary.dart';
+import '../../shared/widgets/card_grid.dart';
 import '../../shared/widgets/cover_image.dart';
+import '../../shared/widgets/playlist_card.dart';
 import 'home_view_model.dart';
-import 'widgets/playlist_card.dart';
 
 /// Home: Main and Liked cards, then the "Your playlists" grid.
 class HomeScreen extends StatelessWidget {
@@ -167,13 +168,7 @@ class _PlaylistsGrid extends StatelessWidget {
 
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      sliver: SliverGrid.builder(
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 200,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.72,
-        ),
+      sliver: CardGrid(
         itemCount: playlists.length,
         itemBuilder: (context, index) {
           final playlist = playlists[index];
