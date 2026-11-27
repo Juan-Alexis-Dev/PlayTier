@@ -17,6 +17,7 @@ import '../features/playlist/playlist_view_model.dart';
 import '../features/preview/preview_screen.dart';
 import '../features/preview/preview_view_model.dart';
 import '../features/search_discover/search_discover_screen.dart';
+import '../features/search_discover/search_view_model.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/settings/settings_view_model.dart';
 import 'shell/adaptive_shell.dart';
@@ -175,7 +176,13 @@ GoRouter createRouter({
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.search,
-              builder: (context, state) => const SearchDiscoverScreen(),
+              builder: (context, state) => ChangeNotifierProvider(
+                create: (context) => SearchViewModel(
+                  search: context.read(),
+                  library: context.read(),
+                ),
+                child: const SearchDiscoverScreen(),
+              ),
             ),
           ]),
           StatefulShellBranch(routes: [
