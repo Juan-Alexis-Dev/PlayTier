@@ -25,6 +25,19 @@ class SpotifyPlaylistItemDto {
     // `item` in the current API; `track` in older responses.
     final item = json['item'] ?? json['track'];
     if (item is! Map<String, dynamic>) return null;
+    return tryParseTrack(
+      item,
+      addedAt: DateTime.tryParse(json['added_at'] as String? ?? ''),
+    );
+  }
+
+  /// Parses a bare track object (for example from `GET /search`).
+  ///
+  /// Returns null for episodes, local files and unplayable tracks.
+  static SpotifyPlaylistItemDto? tryParseTrack(
+    Map<String, dynamic> item, {
+    DateTime? addedAt,
+  }) {
     if (item['type'] != 'track') return null;
     if (item['is_local'] == true || item['is_playable'] == false) return null;
 
@@ -45,7 +58,7 @@ class SpotifyPlaylistItemDto {
       coverUrl: images.isEmpty
           ? null
           : (images.first as Map<String, dynamic>)['url'] as String?,
-      addedAt: DateTime.tryParse(json['added_at'] as String? ?? ''),
+      addedAt: addedAt,
       artists: [
         for (final artist in item['artists'] as List<dynamic>? ?? const [])
           if (artist is Map<String, dynamic> && artist['id'] is String)
