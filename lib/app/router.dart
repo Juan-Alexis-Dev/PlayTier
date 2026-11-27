@@ -92,6 +92,7 @@ GoRouter createRouter({
               builder: (context, state) => ChangeNotifierProvider(
                 create: (context) => HomeViewModel(
                   library: context.read(),
+                  genres: context.read(),
                   levels: context.read(),
                   playlists: context.read(),
                   settings: context.read(),
