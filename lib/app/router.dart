@@ -21,6 +21,7 @@ import '../features/search_discover/search_view_model.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/settings/settings_view_model.dart';
 import 'shell/adaptive_shell.dart';
+import '../features/search_discover/add_music_screen.dart';
 
 /// Route paths, so screens never hard-code them.
 class AppRoutes {
@@ -35,6 +36,10 @@ class AppRoutes {
 
   /// Needs a `PlaylistDraft` as `extra`.
   static const preview = '/home/preview';
+
+  /// Search to fill a playlist (FR-9.4). Needs an `AddMusicTarget` as
+  /// `extra`.
+  static const addMusic = '/home/add-music';
 
   ///A permanent playlist or one of the user's own Spotify playlists.
   static String playlist(String id) => '/home/playlist/$id';
@@ -169,6 +174,26 @@ GoRouter createRouter({
                     )..init(),
                     child: const PreviewScreen(),
                   ),
+                ),
+                GoRoute(
+                  path: 'add-music',
+                  // No target (e.g. a restored route): back to Home.
+                  redirect: (context, state) =>
+                      state.extra is AddMusicTarget ? null : AppRoutes.home,
+                  builder: (context, state) {
+                    final target = state.extra! as AddMusicTarget;
+                    return ChangeNotifierProvider(
+                      create: (context) => SearchViewModel(
+                        search: context.read(),
+                        library: context.read(),
+                        playlists: context.read(),
+                        targetPlaylistId: target.playlistId,
+                        targetName: target.name,
+                        targetTrackIds: target.trackIds,
+                      ),
+                      child: AddMusicScreen(target: target),
+                    );
+                  },
                 ),
               ],
             ),

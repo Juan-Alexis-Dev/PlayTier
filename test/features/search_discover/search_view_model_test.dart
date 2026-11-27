@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playtier/data/repositories/library_repository.dart';
+import 'package:playtier/data/repositories/playlist_repository.dart';
 import 'package:playtier/data/repositories/search_repository.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/search_result.dart';
@@ -12,6 +13,8 @@ import 'package:playtier/features/search_discover/search_view_model.dart';
 class MockSearch extends Mock implements SearchRepository {}
 
 class MockLibrary extends Mock implements LibraryRepository {}
+
+class MockPlaylists extends Mock implements PlaylistRepository {}
 
 SearchResult result(String id, {bool inMain = false}) => SearchResult(
       track: Track(
@@ -37,6 +40,8 @@ void main() {
   late MockSearch search;
   late MockLibrary library;
   late SearchViewModel vm;
+
+  setUpAll(() => registerFallbackValue(<String>[]));
 
   setUp(() {
     search = MockSearch();
@@ -146,18 +151,20 @@ void main() {
     vm.setQuery('muse');
     await vm.submit();
 
-    final ok = await vm.add(vm.results.first);
+    final error = await vm.add(vm.results.first);
 
-    expect(ok, isTrue);
+    expect(error, isNull);
     verify(() => library.addToMain('spotify:track:t1')).called(1);
     expect(vm.results.map((r) => r.inMain), [true, false]);
+    expect(vm.isDone(vm.results.first), isTrue);
     expect(vm.isAdding('t1'), isFalse);
+    expect(vm.addedCount, 1);
   });
 
   test('add does nothing for a track already in main', () async {
-    final ok = await vm.add(result('t1', inMain: true));
+    final error = await vm.add(result('t1', inMain: true));
 
-    expect(ok, isTrue);
+    expect(error, isNull);
     verifyNever(() => library.addToMain(any()));
   });
 
@@ -168,9 +175,88 @@ void main() {
     vm.setQuery('muse');
     await vm.submit();
 
-    final ok = await vm.add(vm.results.first);
+    final error = await vm.add(vm.results.first);
 
-    expect(ok, isFalse);
+    expect(error, isNotNull);
     expect(vm.results.single.inMain, isFalse);
+    expect(vm.addedCount, 0);
+  });
+
+  group('with a target playlist (Add music)', () {
+    late MockPlaylists playlists;
+    late SearchViewModel target;
+
+    setUp(() {
+      playlists = MockPlaylists();
+      target = SearchViewModel(
+        search: search,
+        library: library,
+        playlists: playlists,
+        targetPlaylistId: 'perm1',
+        targetName: 'Road trip',
+        targetTrackIds: const {'t1'},
+      );
+      when(() => playlists.addTracks(any(), any()))
+          .thenAnswer((_) async => const Result.ok(null));
+      when(() => library.addToMain(any()))
+          .thenAnswer((_) async => const Result.ok(null));
+    });
+    tearDown(() => target.dispose());
+
+    test('"done" means already in the target playlist', () {
+      expect(target.hasTarget, isTrue);
+      expect(target.isDone(result('t1')), isTrue);
+      // In main but not in the playlist: can still be added.
+      expect(target.isDone(result('t2', inMain: true)), isFalse);
+    });
+
+    test('adds to the playlist and to main when missing', () async {
+      final error = await target.add(result('t2'));
+
+      expect(error, isNull);
+      verify(() => playlists.addTracks('perm1', ['spotify:track:t2']))
+          .called(1);
+      verify(() => library.addToMain('spotify:track:t2')).called(1);
+      expect(target.isDone(result('t2')), isTrue);
+      expect(target.addedCount, 1);
+    });
+
+    test('a track already in main is only added to the playlist', () async {
+      final error = await target.add(result('t2', inMain: true));
+
+      expect(error, isNull);
+      verify(() => playlists.addTracks('perm1', ['spotify:track:t2']))
+          .called(1);
+      verifyNever(() => library.addToMain(any()));
+    });
+
+    test('a track already in the playlist is not added again', () async {
+      final error = await target.add(result('t1'));
+
+      expect(error, isNull);
+      verifyNever(() => playlists.addTracks(any(), any()));
+      verifyNever(() => library.addToMain(any()));
+    });
+
+    test('if the playlist fails, main is not touched', () async {
+      when(() => playlists.addTracks(any(), any()))
+          .thenAnswer((_) async => Result.error(Exception('403')));
+
+      final error = await target.add(result('t2'));
+
+      expect(error, contains('this playlist'));
+      verifyNever(() => library.addToMain(any()));
+      expect(target.isDone(result('t2')), isFalse);
+    });
+
+    test('if only main fails, the track stays in the playlist', () async {
+      when(() => library.addToMain(any()))
+          .thenAnswer((_) async => Result.error(Exception('500')));
+
+      final error = await target.add(result('t2'));
+
+      expect(error, contains('not to the main playlist'));
+      expect(target.isDone(result('t2')), isTrue);
+    });
   });
 }
