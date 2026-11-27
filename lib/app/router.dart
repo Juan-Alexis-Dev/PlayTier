@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../data/repositories/auth_repository.dart';
+import '../data/repositories/library_repository.dart';
 import '../domain/models/playlist_draft.dart';
 import '../features/home/home_view_model.dart';
 import '../features/browse/browse_screen.dart';
@@ -170,10 +171,10 @@ GoRouter createRouter({
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.genres,
-              // Data source comes in the next issue (Genres/Artists tabs).
               builder: (context, state) => ChangeNotifierProvider(
-                create: (context) =>
-                    BrowseViewModel(Stream.value(const []))..init(),
+                create: (context) => BrowseViewModel(
+                  context.read<LibraryRepository>().watchGenrePlaylists(),
+                )..init(),
                 child: const BrowseScreen(kind: BrowseKind.genres),
               ),
             ),
@@ -181,10 +182,10 @@ GoRouter createRouter({
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.artists,
-              // Data source comes in the next issue (Genres/Artists tabs).
               builder: (context, state) => ChangeNotifierProvider(
-                create: (context) =>
-                    BrowseViewModel(Stream.value(const []))..init(),
+                create: (context) => BrowseViewModel(
+                  context.read<LibraryRepository>().watchArtistPlaylists(),
+                )..init(),
                 child: const BrowseScreen(kind: BrowseKind.artists),
               ),
             ),

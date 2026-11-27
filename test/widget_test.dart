@@ -17,7 +17,7 @@ class MockLibrary extends Mock implements LibraryRepository {}
 void main() {
   // Tests the shell only: no login redirect, and only the PlayerViewModel
   // the mini-player needs (logged out, so nothing plays and it is hidden).
-  // Starts on Settings because Home needs repositories (HomeViewModel).
+  // Starts on Settings because Home needs more repositories (HomeViewModel).
   Future<void> pumpShell(WidgetTester tester, {Size? size}) async {
     if (size != null) {
       tester.view.physicalSize = size;
@@ -28,17 +28,25 @@ void main() {
     addTearDown(router.dispose);
     final loggedIn = ValueNotifier(false);
     addTearDown(loggedIn.dispose);
+    // Genres and Artists tabs read their cards from the library.
+    final library = MockLibrary();
+    when(library.watchGenrePlaylists).thenAnswer((_) => Stream.value(const []));
+    when(library.watchArtistPlaylists)
+        .thenAnswer((_) => Stream.value(const []));
     final player = PlayerViewModel(
       playback: MockPlayback(),
       levels: MockLevels(),
-      library: MockLibrary(),
+      library: library,
       loggedIn: loggedIn,
     )..init();
     addTearDown(player.dispose);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider.value(
-        value: player,
+      MultiProvider(
+        providers: [
+          Provider<LibraryRepository>.value(value: library),
+          ChangeNotifierProvider.value(value: player),
+        ],
         child: MaterialApp.router(routerConfig: router),
       ),
     );
