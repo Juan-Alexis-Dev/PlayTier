@@ -86,7 +86,12 @@ class PlaylistRepository {
   }
 
   /// Name, cover and playable tracks of a Spotify playlist, in order.
-  ///
+  
+  /// Appends [uris] to the end of a playlist in Spotify ("Add music" in a
+  /// permanent playlist, FR-9.4). Does not touch the main playlist.
+  Future<Result<void>> addTracks(String playlistId, List<String> uris) =>
+      _guard(() => _api.addPlaylistItems(playlistId, uris));
+
   /// Used for permanent playlists, which are not cached like the main one.
   Future<Result<PlaylistContent>> getPlaylistContent(String playlistId) {
     return _guard(() async {

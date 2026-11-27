@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../app/router.dart';
 import '../../domain/models/track.dart';
 import '../filters/filter_sheet.dart';
+import '../search_discover/add_music_screen.dart';
 import 'playlist_view_model.dart';
 import 'widgets/action_row.dart';
 import 'widgets/active_filters_bar.dart';
@@ -82,6 +83,9 @@ class PlaylistScreen extends StatelessWidget {
                 onNewSubplaylist: vm.totalCount == 0
                     ? null
                     : () => _openFilters(context, vm),
+                onAddMusic: vm.canAddMusic && vm.loaded
+                    ? () => _addMusic(context, vm)
+                    : null,
               ),
             ),
             if (vm.isLiked && vm.totalCount > 0)
@@ -186,6 +190,21 @@ class PlaylistScreen extends StatelessWidget {
       return 'No tracks left here. They were removed from the main playlist.';
     }
     return 'This playlist has no playable tracks.';
+  }
+
+  /// Opens the search to fill this playlist (FR-9.4). A permanent
+  /// playlist is read again from Spotify afterwards; the main playlist
+  /// updates by itself through the database.
+  Future<void> _addMusic(BuildContext context, PlaylistViewModel vm) async {
+    await context.push(
+      AppRoutes.addMusic,
+      extra: AddMusicTarget(
+        name: vm.name,
+        playlistId: vm.playlistId,
+        trackIds: vm.trackIds,
+      ),
+    );
+    if (vm.playlistId != null) await vm.sync();
   }
 
   Future<void> _openFilters(BuildContext context, PlaylistViewModel vm) async {

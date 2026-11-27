@@ -114,6 +114,10 @@ class PlaylistViewModel extends ChangeNotifier {
   /// "Add music" is hidden in virtual playlists (FR-9.5).
   bool get canAddMusic => !isVirtual;
 
+  /// Ids of every track of the playlist, before filters ("Add music"
+  /// shows them as already added).
+  Set<String> get trackIds => {for (final t in _allTracks) t.id};
+
   /// Main and virtual playlists come from the database.
   bool get _fromDatabase => playlistId == null;
 
