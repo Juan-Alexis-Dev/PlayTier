@@ -11,16 +11,25 @@ typedef MusicBrainzGenre = ({String name, int count});
 ///
 /// No auth, but MusicBrainz requires a descriptive User-Agent and at most
 /// one request per second. Requests are queued and spaced by [minInterval].
+/// A `503` (server busy / rate limited) is retried up to [maxRetries]
+/// times, waiting `Retry-After` or an exponential backoff.
 class MusicBrainzService {
   MusicBrainzService(
     this._client, {
     this.minInterval = const Duration(milliseconds: 1100),
+    this.retryBaseDelay = const Duration(seconds: 2),
+    this.maxRetries = 3,
   });
 
   final http.Client _client;
 
   /// Minimum time between two requests. Tests pass `Duration.zero`.
   final Duration minInterval;
+
+  /// First wait after a `503` without `Retry-After`; doubles each retry.
+  final Duration retryBaseDelay;
+
+  final int maxRetries;
 
   static const _baseUrl = 'https://musicbrainz.org/ws/2';
   static const userAgent =
@@ -93,22 +102,40 @@ class MusicBrainzService {
   }
 
   /// Runs requests one after another, at least [minInterval] apart.
+  /// Retries stay inside the queue, so they also block the next request.
   Future<http.Response> _throttledGet(Uri uri) {
     final request = _queue.then((_) async {
-      final last = _lastRequestAt;
-      if (last != null) {
-        final wait = minInterval - DateTime.now().difference(last);
-        if (wait > Duration.zero) await Future<void>.delayed(wait);
+      for (var retries = 0;; retries++) {
+        await _waitForSlot();
+        final response = await _client.get(uri, headers: {
+          'User-Agent': userAgent,
+          'Accept': 'application/json',
+        });
+        if (response.statusCode != 503 || retries >= maxRetries) {
+          return response;
+        }
+        await Future<void>.delayed(
+          _retryAfter(response) ?? retryBaseDelay * (1 << retries),
+        );
       }
-      _lastRequestAt = DateTime.now();
-      return _client.get(uri, headers: {
-        'User-Agent': userAgent,
-        'Accept': 'application/json',
-      });
     });
     // Keep the queue alive even if this request fails.
     _queue = request.then((_) {}, onError: (Object _) {});
     return request;
+  }
+
+  Future<void> _waitForSlot() async {
+    final last = _lastRequestAt;
+    if (last != null) {
+      final wait = minInterval - DateTime.now().difference(last);
+      if (wait > Duration.zero) await Future<void>.delayed(wait);
+    }
+    _lastRequestAt = DateTime.now();
+  }
+
+  static Duration? _retryAfter(http.Response response) {
+    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
+    return seconds == null ? null : Duration(seconds: seconds);
   }
 }
 

@@ -8,6 +8,7 @@ import 'package:playtier/data/repositories/genre_repository.dart';
 import 'package:playtier/data/services/lastfm/lastfm_service.dart';
 import 'package:playtier/data/services/local/app_database.dart';
 import 'package:playtier/data/services/local/tables.dart';
+import 'package:playtier/data/services/musicbrainz/musicbrainz_api_exception.dart';
 import 'package:playtier/data/services/musicbrainz/musicbrainz_service.dart';
 import 'package:playtier/data/services/spotify/dto/spotify_artist_dto.dart';
 import 'package:playtier/data/services/spotify/spotify_api_exception.dart';
@@ -202,6 +203,21 @@ void main() {
     expect(result, isA<Error<int>>());
     expect(await genresOf('a1'), {'pop': GenreSource.spotify});
     expect(await fetchedAt('a2'), isNull);
+  });
+
+  test('MusicBrainz busy: that artist stays pending, the run goes on',
+      () async {
+    await insertArtist('a1', 'Busy');
+    await insertArtist('a2', 'Fine');
+    when(() => musicBrainz.findArtistBySpotifyId('a1'))
+        .thenThrow(const MusicBrainzApiException(503, 'busy'));
+    spotifyGenres('a2', ['pop']);
+
+    final result = await repo.enrichMissing();
+
+    expect((result as Ok<int>).value, 1);
+    expect(await fetchedAt('a1'), isNull);
+    expect(await genresOf('a2'), {'pop': GenreSource.spotify});
   });
 
   test('an artist removed during the lookup is not saved', () async {
