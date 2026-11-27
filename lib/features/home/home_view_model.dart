@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../data/repositories/genre_repository.dart';
 import '../../data/repositories/levels_repository.dart';
 import '../../data/repositories/library_repository.dart';
 import '../../data/repositories/playlist_repository.dart';
@@ -11,16 +12,19 @@ import '../../domain/models/result.dart';
 
 /// State of Home: Main and Liked cards, "Your playlists" grid.
 ///
-/// Opening Home also syncs the main playlist if it changed (FR-2.2).
+/// Opening Home also syncs the main playlist if it changed (FR-2.2) and
+/// then looks up genres of new artists in the background (FR-2.5).
 class HomeViewModel extends ChangeNotifier {
   HomeViewModel({
     required this._library,
+    required this._genres,
     required this._levels,
     required this._playlists,
     required this._settings,
   });
 
   final LibraryRepository _library;
+  final GenreRepository _genres;
   final LevelsRepository _levels;
   final PlaylistRepository _playlists;
   final SettingsRepository _settings;
@@ -85,6 +89,17 @@ class HomeViewModel extends ChangeNotifier {
 
     _syncing = false;
     notifyListeners();
+
+    // Can take minutes (MusicBrainz allows 1 request/s); genres appear
+    // through the database streams. Failed artists are retried next sync.
+    unawaited(_enrichGenres());
+  }
+
+  Future<void> _enrichGenres() async {
+    final result = await _genres.enrichMissing();
+    if (result case Error(:final error)) {
+      debugPrint('Genre enrichment stopped: $error');
+    }
   }
 
   Future<void> loadPlaylists() async {
