@@ -39,7 +39,17 @@ class AppRoutes {
   static String playlist(String id) => '/home/playlist/$id';
   static const search = '/search';
   static const genres = '/genres';
+
+  /// Genre virtual playlist. The genre goes in the query: names can have
+  /// spaces, accents or "/".
+  static String genrePlaylist(String genre) =>
+      Uri(path: '$genres/playlist', queryParameters: {'genre': genre})
+          .toString();
+
   static const artists = '/artists';
+
+  /// Artist virtual playlist (Spotify artist id).
+  static String artistPlaylist(String artistId) => '$artists/$artistId';
   static const settings = '/settings';
 
   /// Full screen, above the tabs (opened from the mini-player).
@@ -175,8 +185,33 @@ GoRouter createRouter({
                 create: (context) => BrowseViewModel(
                   context.read<LibraryRepository>().watchGenrePlaylists(),
                 )..init(),
-                child: const BrowseScreen(kind: BrowseKind.genres),
+                child: BrowseScreen(
+                  kind: BrowseKind.genres,
+                  onOpen: (item) =>
+                      context.go(AppRoutes.genrePlaylist(item.id)),
+                ),
               ),
+              routes: [
+                // Inside the Genres branch so the tabs stay visible.
+                GoRoute(
+                  path: 'playlist',
+                  redirect: (context, state) =>
+                      state.uri.queryParameters['genre'] == null
+                          ? AppRoutes.genres
+                          : null,
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) => PlaylistViewModel(
+                      genre: state.uri.queryParameters['genre'],
+                      library: context.read(),
+                      levels: context.read(),
+                      playback: context.read(),
+                      playlists: context.read(),
+                      settings: context.read(),
+                    )..init(),
+                    child: const PlaylistScreen(),
+                  ),
+                ),
+              ],
             ),
           ]),
           StatefulShellBranch(routes: [
@@ -186,8 +221,28 @@ GoRouter createRouter({
                 create: (context) => BrowseViewModel(
                   context.read<LibraryRepository>().watchArtistPlaylists(),
                 )..init(),
-                child: const BrowseScreen(kind: BrowseKind.artists),
+                child: BrowseScreen(
+                  kind: BrowseKind.artists,
+                  onOpen: (item) =>
+                      context.go(AppRoutes.artistPlaylist(item.id)),
+                ),
               ),
+              routes: [
+                GoRoute(
+                  path: ':id',
+                  builder: (context, state) => ChangeNotifierProvider(
+                    create: (context) => PlaylistViewModel(
+                      artistId: state.pathParameters['id'],
+                      library: context.read(),
+                      levels: context.read(),
+                      playback: context.read(),
+                      playlists: context.read(),
+                      settings: context.read(),
+                    )..init(),
+                    child: const PlaylistScreen(),
+                  ),
+                ),
+              ],
             ),
           ]),
           StatefulShellBranch(routes: [

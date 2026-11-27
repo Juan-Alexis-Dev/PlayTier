@@ -40,7 +40,7 @@ abstract final class VirtualPlaylists {
       for (final facet in FacetCounter.genres(tracks, genresByArtist))
         (
           id: facet.value,
-          name: _capitalize(facet.value),
+          name: genreName(facet.value),
           trackCount: facet.count,
           coverUrls: covers[facet.value] ?? const [],
         ),
@@ -81,7 +81,7 @@ abstract final class VirtualPlaylists {
     if (list.length < maxCovers && !list.contains(url)) list.add(url);
   }
 
-  /// "rock en español" → "Rock en español".
-  static String _capitalize(String text) =>
+  /// Display name of a genre: "rock en español" → "Rock en español".
+  static String genreName(String text) =>
       text.isEmpty ? text : text[0].toUpperCase() + text.substring(1);
 }

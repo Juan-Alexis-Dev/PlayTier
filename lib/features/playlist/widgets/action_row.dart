@@ -4,7 +4,8 @@ import 'package:material_ui/material_ui.dart';
 ///
 /// Every callback is optional: a null callback shows a disabled button.
 /// Play, Shuffle, Sort and New subplaylist are wired; Add music (v0.5)
-/// and More options come later.
+/// and More options come later. [showAddMusic] false hides Add music
+/// (virtual playlists, FR-9.5).
 class ActionRow extends StatelessWidget {
   const ActionRow({
     super.key,
@@ -14,6 +15,7 @@ class ActionRow extends StatelessWidget {
     this.onNewSubplaylist,
     this.onAddMusic,
     this.onMore,
+    this.showAddMusic = true,
   });
 
   final VoidCallback? onPlay;
@@ -22,6 +24,7 @@ class ActionRow extends StatelessWidget {
   final VoidCallback? onNewSubplaylist;
   final VoidCallback? onAddMusic;
   final VoidCallback? onMore;
+  final bool showAddMusic;
 
   @override
   Widget build(BuildContext context) {
@@ -52,11 +55,12 @@ class ActionRow extends StatelessWidget {
             tooltip: 'New subplaylist',
             icon: const Icon(Icons.filter_list),
           ),
-          IconButton(
-            onPressed: onAddMusic,
-            tooltip: 'Add music',
-            icon: const Icon(Icons.playlist_add),
-          ),
+          if (showAddMusic)
+            IconButton(
+              onPressed: onAddMusic,
+              tooltip: 'Add music',
+              icon: const Icon(Icons.playlist_add),
+            ),
           IconButton(
             onPressed: onMore,
             tooltip: 'More options',

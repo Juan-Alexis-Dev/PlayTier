@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playtier/data/repositories/levels_repository.dart';
@@ -311,5 +313,129 @@ void main() {
     expect(vm.loaded, isTrue);
     expect(vm.tracks, isEmpty);
     expect(vm.errorMessage, isNotNull);
+  });
+
+  group('genre and artist playlists', () {
+    Track multi(String id, List<String> artists, {String? cover}) => Track(
+          id: id,
+          uri: 'spotify:track:$id',
+          name: id,
+          artistIds: artists,
+          albumId: 'al1',
+          albumName: 'Album',
+          duration: const Duration(minutes: 3),
+          coverUrl: cover,
+        );
+
+    final tracks = [
+      multi('t1', ['a'], cover: 'c1'),
+      multi('t2', ['b', 'a'], cover: 'c2'), // a is featured
+      multi('t3', ['b'], cover: 'c3'),
+    ];
+    late StreamController<Map<String, List<String>>> genres;
+
+    setUp(() {
+      genres = StreamController<Map<String, List<String>>>.broadcast();
+      when(library.watchTracks).thenAnswer((_) => Stream.value(tracks));
+      when(library.watchArtistNames).thenAnswer(
+        (_) => Stream.value(const {'a': 'Muse', 'b': 'Blur'}),
+      );
+      when(library.watchArtistGenres).thenAnswer((_) => genres.stream);
+      when(() => library.syncIfChanged())
+          .thenAnswer((_) async => const Result.ok(false));
+      when(() => playlists.writePlaybackPlaylist(any()))
+          .thenAnswer((_) async => const Result.ok('spotify:playlist:pb'));
+    });
+    tearDown(() => genres.close());
+
+    PlaylistViewModel create({String? genre, String? artistId}) =>
+        PlaylistViewModel(
+          genre: genre,
+          artistId: artistId,
+          library: library,
+          levels: levels,
+          playback: playback,
+          playlists: playlists,
+          settings: settings,
+        );
+
+    /// Lets the streams deliver their events.
+    Future<void> pump() => Future<void>.delayed(Duration.zero);
+
+    test('genre: tracks with any artist of that genre', () async {
+      final vm = create(genre: 'rock en español');
+      await vm.init();
+      genres.add(const {
+        'a': ['rock en español'],
+        'b': ['britpop'],
+      });
+      await pump();
+
+      expect(vm.name, 'Rock en español');
+      expect(vm.isMain, isFalse);
+      expect(vm.isVirtual, isTrue);
+      expect(vm.canAddMusic, isFalse);
+      expect(vm.tracks.map((t) => t.id), ['t1', 't2']);
+      expect(vm.coverUrls, ['c1', 'c2']);
+      verifyNever(library.getMainPlaylistInfo);
+    });
+
+    test('genre: the list updates when enrichment finds genres', () async {
+      final vm = create(genre: 'britpop');
+      await vm.init();
+      genres.add(const {});
+      await pump();
+      expect(vm.tracks, isEmpty);
+
+      genres.add(const {
+        'b': ['britpop'],
+      });
+      await pump();
+      expect(vm.tracks.map((t) => t.id), ['t2', 't3']);
+    });
+
+    test('artist: own and featured tracks, named after the artist', () async {
+      final vm = create(artistId: 'a');
+      await vm.init();
+      genres.add(const {});
+      await pump();
+
+      expect(vm.name, 'Muse');
+      expect(vm.canAddMusic, isFalse);
+      expect(vm.tracks.map((t) => t.id), ['t1', 't2']);
+    });
+
+    test('Play writes the list (there is no Spotify playlist)', () async {
+      final vm = create(artistId: 'b');
+      await vm.init();
+      genres.add(const {});
+      await pump();
+      await vm.play();
+
+      verify(() => playlists.writePlaybackPlaylist(
+            ['spotify:track:t2', 'spotify:track:t3'],
+          )).called(1);
+      verify(() => playback.playList(
+            'spotify:playlist:pb',
+            startIndex: 0,
+            name: 'Blur',
+          )).called(1);
+      verifyNever(settings.getMainPlaylistId);
+    });
+
+    test('a draft without filters is named after the genre', () async {
+      final vm = create(genre: 'britpop');
+      await vm.init();
+      genres.add(const {
+        'b': ['britpop'],
+      });
+      await pump();
+
+      expect(vm.createDraft().name, 'Britpop');
+    });
+
+    test('main and permanent playlists can add music', () {
+      expect(permanent().canAddMusic, isTrue);
+    });
   });
 }
