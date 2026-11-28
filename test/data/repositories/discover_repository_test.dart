@@ -799,4 +799,151 @@ void main() {
       );
     });
   });
+
+  group('musicToTry', () {
+    void stubLastFm({
+      List<LastFmTrack> chartTracks = const [],
+      List<String> chartArtists = const [],
+      List<String> chartTags = const [],
+      Map<String, List<LastFmTrack>> artistTop = const {},
+      Map<String, List<LastFmTrack>> tagTop = const {},
+    }) {
+      when(() => lastFm.getChartTopTracks(limit: any(named: 'limit')))
+          .thenAnswer((_) async => chartTracks);
+      when(() => lastFm.getChartTopArtists(limit: any(named: 'limit')))
+          .thenAnswer((_) async => chartArtists);
+      when(() => lastFm.getChartTopTags(limit: any(named: 'limit')))
+          .thenAnswer((_) async => chartTags);
+      when(() => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => artistTop[i.positionalArguments.first] ?? const [],
+      );
+      when(() => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => tagTop[i.positionalArguments.first] ?? const [],
+      );
+    }
+
+    PlaylistDraft draftOf(Result<PlaylistDraft> result) =>
+        (result as Ok<PlaylistDraft>).value;
+
+    setUp(() async {
+      // Library: Muse ("Starlight", setUp above) with genres rock, hip-hop.
+      for (final genre in ['rock', 'hip-hop']) {
+        await db.into(db.artistGenres).insert(ArtistGenresCompanion.insert(
+              artistId: 'muse',
+              genre: genre,
+              source: GenreSource.lastFm,
+            ));
+      }
+    });
+
+    test('mixes chart tracks, new artists and new genres', () async {
+      stubLastFm(
+        chartTracks: [
+          lf('Uprising'), // artist in the library
+          lf('Starlight'), // owned
+          lf('Hit 1', 'Star A'),
+          lf('Hit 2', 'Star B'),
+        ],
+        chartArtists: ['Muse', 'Star C', 'Star D'],
+        chartTags: ['seen live', 'Hip Hop', 'Rock', 'K-Pop', 'jazz'],
+        artistTop: {
+          'Star C': [lf('C1', 'Star C')],
+          'Star D': [lf('D1', 'Star D')],
+        },
+        tagTop: {
+          'k-pop': [lf('K1', 'Band K')],
+          'jazz': [
+            lf('J1', 'Band J'),
+            lf('Supermassive'), // by Muse, in the library
+          ],
+        },
+      );
+      for (final (id, name, artist) in [
+        ('h1', 'Hit 1', 'Star A'),
+        ('h2', 'Hit 2', 'Star B'),
+        ('c1', 'C1', 'Star C'),
+        ('d1', 'D1', 'Star D'),
+        ('k1', 'K1', 'Band K'),
+        ('j1', 'J1', 'Band J'),
+      ]) {
+        spotify[q(name, artist)] = [dto(id, name, artists: [artist])];
+      }
+
+      final draft = draftOf(await repo.musicToTry());
+
+      expect(draft.name, 'Music to try');
+      expect(
+        draft.tracks.map((t) => t.id),
+        ['h1', 'c1', 'k1', 'h2', 'd1', 'j1'],
+      );
+    });
+
+    test('skips your artists and genres (and non-genre tags)', () async {
+      stubLastFm(
+        chartArtists: ['MUSE', 'Star C'],
+        // "Hip Hop" = your "hip-hop"; "seen live" is not a genre.
+        chartTags: ['seen live', 'Hip Hop', 'rock', 'jazz'],
+      );
+
+      await repo.musicToTry();
+
+      expect(
+        verify(() => lastFm.getArtistTopTracks(
+              captureAny(),
+              limit: DiscoverRepository.tracksPerChartArtist,
+            )).captured,
+        ['Star C'],
+      );
+      expect(
+        verify(() => lastFm.getTagTopTracks(
+              captureAny(),
+              limit: DiscoverRepository.tracksPerNewGenre,
+            )).captured,
+        ['jazz'],
+      );
+    });
+
+    test('reads each chart once and limits artists and genres', () async {
+      stubLastFm(
+        chartArtists: [for (var i = 0; i < 8; i++) 'Artist $i'],
+        chartTags: [for (var i = 0; i < 6; i++) 'genre $i'],
+      );
+
+      await repo.musicToTry();
+
+      verify(() => lastFm.getChartTopTracks(
+            limit: DiscoverRepository.chartSize,
+          )).called(1);
+      verify(() => lastFm.getChartTopArtists(
+            limit: DiscoverRepository.chartSize,
+          )).called(1);
+      verify(() => lastFm.getChartTopTags(
+            limit: DiscoverRepository.chartSize,
+          )).called(1);
+      verify(() => lastFm.getArtistTopTracks(
+            any(),
+            limit: any(named: 'limit'),
+          )).called(DiscoverRepository.chartArtistsPerRun);
+      verify(() => lastFm.getTagTopTracks(
+            any(),
+            limit: any(named: 'limit'),
+          )).called(DiscoverRepository.chartGenresPerRun);
+    });
+
+    test('a Last.fm error returns Error', () async {
+      stubLastFm();
+      when(() => lastFm.getChartTopTags(limit: any(named: 'limit')))
+          .thenThrow(const LastFmApiException(500, 'down'));
+
+      expect(await repo.musicToTry(), isA<Error<PlaylistDraft>>());
+    });
+
+    test('without Last.fm returns Error', () async {
+      final noLastFm = DiscoverRepository(api: api, db: db, lastFm: null);
+
+      expect(await noLastFm.musicToTry(), isA<Error<PlaylistDraft>>());
+    });
+  });
 }

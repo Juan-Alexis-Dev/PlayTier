@@ -1,3 +1,4 @@
+import '../../domain/engines/genre_cleaner.dart';
 import '../../domain/models/discover_mode.dart';
 import '../../domain/models/playlist_draft.dart';
 import '../../domain/models/result.dart';
@@ -83,6 +84,18 @@ class DiscoverRepository {
 
   /// Mode 3: top tracks requested per similar genre.
   static const tracksPerNewGenre = 15;
+
+  /// Mode 4: size of each Last.fm global chart that is read.
+  static const chartSize = 50;
+
+  /// Mode 4: chart artists (not in the library) whose top tracks are used.
+  static const chartArtistsPerRun = 5;
+
+  /// Mode 4: top tracks requested per chart artist.
+  static const tracksPerChartArtist = 3;
+
+  /// Mode 4: chart genres (not in the library) whose top tracks are used.
+  static const chartGenresPerRun = 3;
 
   /// Discover needs Last.fm; the UI hides it when this is false.
   bool get isAvailable => _lastFm != null;
@@ -276,6 +289,74 @@ class DiscoverRepository {
     }
   }
 
+  /// Mode 4, "Music to try" (FR-10.4): outside your taste.
+  ///
+  /// Uses Last.fm's global charts and keeps only what is different from
+  /// the library: no artist you have, no genre you have. Mixes three
+  /// sources, one track of each per turn:
+  /// 1. chart top tracks;
+  /// 2. top tracks of the first [chartArtistsPerRun] chart artists;
+  /// 3. top tracks of the first [chartGenresPerRun] chart genres (tags
+  ///    that are not genres, like "seen live", are skipped).
+  Future<Result<PlaylistDraft>> musicToTry({
+    int maxTracks = defaultMaxTracks,
+  }) async {
+    final lastFm = _lastFm;
+    if (lastFm == null) return Result.error(_noLastFm);
+
+    try {
+      final knownArtists = await _libraryArtistNames();
+      final knownGenres = await _libraryGenres();
+
+      final chartTracks = await lastFm.getChartTopTracks(limit: chartSize);
+      final chartArtists = await lastFm.getChartTopArtists(limit: chartSize);
+      final chartTags = await lastFm.getChartTopTags(limit: chartSize);
+
+      final newArtists = [
+        for (final artist in chartArtists)
+          if (!knownArtists.contains(normalize(artist))) artist,
+      ].take(chartArtistsPerRun).toList();
+      final newGenres = [
+        for (final genre in GenreCleaner.clean(
+          [for (final tag in chartTags) (name: tag, count: 0)],
+          artistName: '',
+          limit: null,
+        ))
+          if (!knownGenres.contains(normalize(genre))) genre,
+      ].take(chartGenresPerRun).toList();
+
+      final artistTracks = await Future.wait([
+        for (final artist in newArtists)
+          lastFm.getArtistTopTracks(artist, limit: tracksPerChartArtist),
+      ]);
+      final genreTracks = await Future.wait([
+        for (final genre in newGenres)
+          lastFm.getTagTopTracks(genre, limit: tracksPerNewGenre),
+      ]);
+
+      // Not owned and not by an artist of the library.
+      final owned = (await _ownedSongs()).keys;
+      List<LastFmTrack> outside(List<LastFmTrack> tracks) => [
+            for (final t in _fresh(tracks, owned))
+              if (!knownArtists.contains(normalize(t.artist))) t,
+          ];
+
+      return _draft(
+        DiscoverMode.toTry,
+        await matchTracks(
+          interleave([
+            outside(chartTracks),
+            interleave([for (final list in artistTracks) outside(list)]),
+            interleave([for (final list in genreTracks) outside(list)]),
+          ]),
+          maxTracks: maxTracks,
+        ),
+      );
+    } on Exception catch (e) {
+      return Result.error(e);
+    }
+  }
+
   /// Matches Last.fm [candidates] to Spotify tracks not in the main
   /// playlist, keeping the candidates' order, up to [maxTracks].
   ///
@@ -422,6 +503,12 @@ class DiscoverRepository {
   Future<Set<String>> _libraryArtistNames() async {
     final rows = await _db.select(_db.artists).get();
     return {for (final row in rows) normalize(row.name)};
+  }
+
+  /// Normalized genres of every artist in the library.
+  Future<Set<String>> _libraryGenres() async {
+    final rows = await _db.select(_db.artistGenres).get();
+    return {for (final row in rows) normalize(row.genre)};
   }
 
   /// Similar artists from several seeds, best total match first, without
