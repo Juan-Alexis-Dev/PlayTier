@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show InsertMode;
+import 'package:drift/drift.dart' show InsertMode, Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -583,6 +583,218 @@ void main() {
 
       expect(
         await noLastFm.newFromYourGenres(),
+        isA<Error<PlaylistDraft>>(),
+      );
+    });
+  });
+
+  test('rankNewArtists sums matches and skips known artists', () {
+    final ranked = DiscoverRepository.rankNewArtists(
+      [
+        [
+          (name: 'Radiohead', match: 1.0),
+          (name: 'Placebo', match: 0.8),
+          (name: 'Coldplay', match: 0.5),
+        ],
+        [
+          (name: 'coldplay', match: 0.6), // same artist, other case
+          (name: 'Keane', match: 0.8),
+        ],
+      ],
+      known: {DiscoverRepository.normalize('Radiohead')},
+    );
+
+    // Coldplay 1.1; Placebo and Keane tie at 0.8 → order of appearance.
+    expect(ranked, ['Coldplay', 'Placebo', 'Keane']);
+  });
+
+  group('musicYouCouldLike', () {
+    void stubLastFm({
+      Map<String, List<LastFmTrack>> similarTracks = const {},
+      Map<String, List<LastFmSimilarArtist>> similarArtists = const {},
+      Map<String, List<String>> similarTags = const {},
+      Map<String, List<LastFmTrack>> artistTop = const {},
+      Map<String, List<LastFmTrack>> tagTop = const {},
+    }) {
+      when(() => lastFm.getSimilarTracks(
+            any(),
+            any(),
+            limit: any(named: 'limit'),
+          )).thenAnswer((i) async {
+        final key = '${i.positionalArguments[0]}|${i.positionalArguments[1]}';
+        return similarTracks[key] ?? const [];
+      });
+      when(() => lastFm.getSimilarArtists(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => similarArtists[i.positionalArguments.first] ?? const [],
+      );
+      when(() => lastFm.getSimilarTags(any())).thenAnswer(
+        (i) async => similarTags[i.positionalArguments.first] ?? const [],
+      );
+      when(() => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => artistTop[i.positionalArguments.first] ?? const [],
+      );
+      when(() => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => tagTop[i.positionalArguments.first] ?? const [],
+      );
+    }
+
+    PlaylistDraft draftOf(Result<PlaylistDraft> result) =>
+        (result as Ok<PlaylistDraft>).value;
+
+    setUp(() async {
+      // Library: "Starlight" by Muse (setUp above, position 0, level 3)
+      // and "Airbag" by Radiohead (position 1, level 5). Both artists
+      // are "alternative".
+      await db.into(db.artists).insert(
+            ArtistsCompanion.insert(id: 'rh', name: 'Radiohead'),
+          );
+      await db.into(db.tracks).insert(TracksCompanion.insert(
+            id: 'rh1',
+            uri: 'spotify:track:rh1',
+            name: 'Airbag',
+            albumId: 'al',
+            albumName: 'OK Computer',
+            durationMs: 280000,
+            position: 1,
+          ));
+      await db.into(db.trackArtists).insert(TrackArtistsCompanion.insert(
+            trackId: 'rh1',
+            artistId: 'rh',
+            position: 0,
+          ));
+      for (final (id, level) in [('own', 3), ('rh1', 5)]) {
+        await db.into(db.trackLevels).insert(
+              TrackLevelsCompanion.insert(trackId: id, level: Value(level)),
+            );
+      }
+      for (final artistId in ['muse', 'rh']) {
+        await db.into(db.artistGenres).insert(ArtistGenresCompanion.insert(
+              artistId: artistId,
+              genre: 'alternative',
+              source: GenreSource.lastFm,
+            ));
+      }
+    });
+
+    test('uses favourite tracks, top artists and top genres as seeds',
+        () async {
+      stubLastFm();
+
+      await repo.musicYouCouldLike();
+
+      // Highest level first: Airbag (5) before Starlight (3).
+      expect(
+        verify(() => lastFm.getSimilarTracks(
+              captureAny(),
+              captureAny(),
+              limit: DiscoverRepository.similarTracksPerSeed,
+            )).captured,
+        ['Radiohead', 'Airbag', 'Muse', 'Starlight'],
+      );
+      expect(
+        verify(() => lastFm.getSimilarArtists(
+              captureAny(),
+              limit: DiscoverRepository.similarArtistsPerSeed,
+            )).captured,
+        ['Muse', 'Radiohead'],
+      );
+      expect(
+        verify(() => lastFm.getSimilarTags(captureAny())).captured,
+        ['alternative'],
+      );
+    });
+
+    test('mixes similar tracks, new artists and similar genres', () async {
+      stubLastFm(
+        similarTracks: {
+          'Radiohead|Airbag': [
+            lf('Creep', 'Radiohead'),
+            lf('Starlight'), // owned
+          ],
+          'Muse|Starlight': [lf('Supermassive')],
+        },
+        similarArtists: {
+          'Muse': [
+            (name: 'Radiohead', match: 1.0), // in the library
+            (name: 'Placebo', match: 0.8),
+            (name: 'Coldplay', match: 0.5),
+          ],
+          'Radiohead': [
+            (name: 'Coldplay', match: 0.6),
+            (name: 'Muse', match: 0.9), // in the library
+          ],
+        },
+        similarTags: {
+          'alternative': ['Indie', 'Alternative'], // the seed is skipped
+        },
+        artistTop: {
+          'Coldplay': [lf('Yellow', 'Coldplay')],
+          'Placebo': [lf('Every You', 'Placebo')],
+        },
+        tagTop: {
+          'indie': [lf('Song I', 'Band I')],
+        },
+      );
+      for (final (id, name, artist) in [
+        ('creep', 'Creep', 'Radiohead'),
+        ('super', 'Supermassive', 'Muse'),
+        ('yellow', 'Yellow', 'Coldplay'),
+        ('every', 'Every You', 'Placebo'),
+        ('songi', 'Song I', 'Band I'),
+      ]) {
+        spotify[q(name, artist)] = [dto(id, name, artists: [artist])];
+      }
+
+      final draft = draftOf(await repo.musicYouCouldLike());
+
+      expect(draft.name, 'Music you could like');
+      expect(
+        draft.tracks.map((t) => t.id),
+        ['creep', 'yellow', 'songi', 'super', 'every'],
+      );
+      // New artists by total match: Coldplay (1.1), Placebo (0.8).
+      expect(
+        verify(() => lastFm.getArtistTopTracks(
+              captureAny(),
+              limit: DiscoverRepository.tracksPerNewArtist,
+            )).captured,
+        ['Coldplay', 'Placebo'],
+      );
+      expect(
+        verify(() => lastFm.getTagTopTracks(
+              captureAny(),
+              limit: DiscoverRepository.tracksPerNewGenre,
+            )).captured,
+        ['indie'],
+      );
+    });
+
+    test('an empty library returns an empty draft without calls', () async {
+      await db.delete(db.trackArtists).go();
+      await db.delete(db.artistGenres).go();
+      await db.delete(db.tracks).go();
+      stubLastFm();
+
+      expect(draftOf(await repo.musicYouCouldLike()).tracks, isEmpty);
+      verifyZeroInteractions(lastFm);
+    });
+
+    test('a Last.fm error returns Error', () async {
+      stubLastFm();
+      when(() => lastFm.getSimilarArtists(any(), limit: any(named: 'limit')))
+          .thenThrow(const LastFmApiException(500, 'down'));
+
+      expect(await repo.musicYouCouldLike(), isA<Error<PlaylistDraft>>());
+    });
+
+    test('without Last.fm returns Error', () async {
+      final noLastFm = DiscoverRepository(api: api, db: db, lastFm: null);
+
+      expect(
+        await noLastFm.musicYouCouldLike(),
         isA<Error<PlaylistDraft>>(),
       );
     });

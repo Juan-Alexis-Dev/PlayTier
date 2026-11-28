@@ -79,8 +79,8 @@ void main() {
     for (final mode in DiscoverViewModel.cardModes) {
       expect(find.text(mode.title), findsOneWidget);
     }
-    // Modes 1 and 2 are ready in this version.
-    expect(find.text('Coming soon'), findsNWidgets(2));
+    // Modes 1–3 are ready in this version.
+    expect(find.text('Coming soon'), findsOneWidget);
   });
 
   testWidgets('Discover is replaced by a message without Last.fm',
