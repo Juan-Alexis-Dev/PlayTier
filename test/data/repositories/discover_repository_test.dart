@@ -43,6 +43,12 @@ SpotifyPlaylistItemDto dto(
 LastFmTrack lf(String name, [String artist = 'Muse']) =>
     (name: name, artist: artist);
 
+/// Shufflers for tests: no change, or reversed (a "different" random).
+void keepOrder(List<Object?> list) {}
+
+void reverseOrder(List<Object?> list) =>
+    list.setAll(0, list.reversed.toList());
+
 void main() {
   late AppDatabase db;
   late MockSpotify api;
@@ -76,7 +82,13 @@ void main() {
     db = AppDatabase(NativeDatabase.memory());
     api = MockSpotify();
     lastFm = MockLastFm();
-    repo = DiscoverRepository(api: api, db: db, lastFm: lastFm);
+    // Keeps every order, so results are predictable.
+    repo = DiscoverRepository(
+      api: api,
+      db: db,
+      lastFm: lastFm,
+      shuffle: keepOrder,
+    );
     spotify = {};
     stubSearch();
 
@@ -377,6 +389,34 @@ void main() {
 
       final draft = draftOf(await repo.newFromYourArtists(maxTracks: 1));
       expect(draft.tracks.map((t) => t.id), ['creep']);
+    });
+
+    test('another shuffle gives other artists and track order', () async {
+      final shuffled = DiscoverRepository(
+        api: api,
+        db: db,
+        lastFm: lastFm,
+        shuffle: reverseOrder,
+      );
+      stubTopTracks({
+        'Radiohead': [
+          lf('Creep', 'Radiohead'),
+          lf('Karma Police', 'Radiohead'),
+        ],
+        'Muse': [lf('Uprising')],
+      });
+      spotify[q('Creep', 'Radiohead')] = [
+        dto('creep', 'Creep', artists: ['Radiohead']),
+      ];
+      spotify[q('Karma Police', 'Radiohead')] = [
+        dto('karma', 'Karma Police', artists: ['Radiohead']),
+      ];
+      spotify[q('Uprising')] = [dto('upr', 'Uprising')];
+
+      final draft = draftOf(await shuffled.newFromYourArtists());
+
+      // Artists picked as [Muse, Radiohead]; Radiohead's tracks reversed.
+      expect(draft.tracks.map((t) => t.id), ['upr', 'karma', 'creep']);
     });
 
     test('an empty library returns an empty draft without calls', () async {
@@ -708,6 +748,35 @@ void main() {
       );
     });
 
+    test('another shuffle uses other seeds', () async {
+      final shuffled = DiscoverRepository(
+        api: api,
+        db: db,
+        lastFm: lastFm,
+        shuffle: reverseOrder,
+      );
+      stubLastFm();
+
+      await shuffled.musicYouCouldLike();
+
+      // Pool order reversed: Starlight before Airbag, Radiohead before Muse.
+      expect(
+        verify(() => lastFm.getSimilarTracks(
+              captureAny(),
+              captureAny(),
+              limit: any(named: 'limit'),
+            )).captured,
+        ['Muse', 'Starlight', 'Radiohead', 'Airbag'],
+      );
+      expect(
+        verify(() => lastFm.getSimilarArtists(
+              captureAny(),
+              limit: any(named: 'limit'),
+            )).captured,
+        ['Radiohead', 'Muse'],
+      );
+    });
+
     test('mixes similar tracks, new artists and similar genres', () async {
       stubLastFm(
         similarTracks: {
@@ -934,6 +1003,38 @@ void main() {
             any(),
             limit: any(named: 'limit'),
           )).called(DiscoverRepository.chartGenresPerRun);
+    });
+
+    test('picks chart artists and genres at random among the new ones',
+        () async {
+      final shuffled = DiscoverRepository(
+        api: api,
+        db: db,
+        lastFm: lastFm,
+        shuffle: reverseOrder,
+      );
+      stubLastFm(
+        chartArtists: ['Muse', for (var i = 0; i < 8; i++) 'Artist $i'],
+        chartTags: ['rock', for (var i = 0; i < 6; i++) 'genre $i'],
+      );
+
+      await shuffled.musicToTry();
+
+      // Not always the first ones of the chart; never your Muse or rock.
+      expect(
+        verify(() => lastFm.getArtistTopTracks(
+              captureAny(),
+              limit: any(named: 'limit'),
+            )).captured,
+        ['Artist 7', 'Artist 6', 'Artist 5', 'Artist 4', 'Artist 3'],
+      );
+      expect(
+        verify(() => lastFm.getTagTopTracks(
+              captureAny(),
+              limit: any(named: 'limit'),
+            )).captured,
+        ['genre 5', 'genre 4', 'genre 3'],
+      );
     });
 
     test('a Last.fm error returns Error', () async {
