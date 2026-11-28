@@ -30,7 +30,7 @@ SearchResult result(String id, {bool inMain = false}) => SearchResult(
       inMain: inMain,
     );
 
-/// A full page of results t<start>…t<start + pageSize - 1>.
+/// A full page of results `t<start>` … `t<start + pageSize - 1>`.
 List<SearchResult> page(int start) => [
       for (var i = start; i < start + SearchRepository.pageSize; i++)
         result('t$i'),
