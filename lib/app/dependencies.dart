@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:provider/single_child_widget.dart';
 
 import '../data/repositories/auth_repository.dart';
+import '../data/repositories/discover_repository.dart';
 import '../data/repositories/genre_repository.dart';
 import '../data/repositories/levels_repository.dart';
 import '../data/repositories/library_repository.dart';
@@ -68,6 +69,11 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     lastFm: lastFmService,
   );
   final searchRepository = SearchRepository(api: apiService, db: database);
+  final discoverRepository = DiscoverRepository(
+    api: apiService,
+    db: database,
+    lastFm: lastFmService,
+  );
   final playbackRepository = PlaybackRepository(
     playbackService,
     playlists: playlistRepository,
@@ -95,6 +101,7 @@ Future<List<SingleChildWidget>> buildProviders(AppConfig config) async {
     Provider.value(value: libraryRepository),
     Provider.value(value: genreRepository),
     Provider.value(value: searchRepository),
+    Provider.value(value: discoverRepository),
     Provider.value(value: levelsRepository),
     Provider.value(value: playbackRepository),
     ChangeNotifierProvider.value(value: settingsViewModel),
