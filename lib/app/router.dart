@@ -201,8 +201,10 @@ GoRouter createRouter({
                     ),
                   ),
                   ChangeNotifierProvider(
-                    create: (context) =>
-                        DiscoverViewModel(discover: context.read()),
+                    create: (context) => DiscoverViewModel(
+                      discover: context.read(),
+                      library: context.read(),
+                    )..init(),
                   ),
                 ],
                 child: const SearchDiscoverScreen(),

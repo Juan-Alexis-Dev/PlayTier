@@ -3,13 +3,21 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playtier/data/repositories/discover_repository.dart';
+import 'package:playtier/data/repositories/library_repository.dart';
+import 'package:playtier/domain/engines/virtual_playlists.dart';
 import 'package:playtier/domain/models/discover_mode.dart';
+import 'package:playtier/domain/models/discover_parameter.dart';
 import 'package:playtier/domain/models/playlist_draft.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/track.dart';
 import 'package:playtier/features/search_discover/discover_view_model.dart';
 
 class MockDiscover extends Mock implements DiscoverRepository {}
+
+class MockLibrary extends Mock implements LibraryRepository {}
+
+VirtualPlaylist vp(String id, String name) =>
+    (id: id, name: name, trackCount: 1, coverUrls: const []);
 
 const track = Track(
   id: 't1',
@@ -28,12 +36,25 @@ const draft = PlaylistDraft(
 
 void main() {
   late MockDiscover discover;
+  late MockLibrary library;
   late DiscoverViewModel vm;
 
-  setUp(() {
+  setUp(() async {
     discover = MockDiscover();
+    library = MockLibrary();
     when(() => discover.isAvailable).thenReturn(true);
-    vm = DiscoverViewModel(discover: discover);
+    // Library order: most tracks first.
+    when(library.watchArtistPlaylists).thenAnswer((_) => Stream.value([
+          vp('a1', 'Muse'),
+          vp('a2', 'Radiohead'),
+          vp('a3', 'Mumford & Sons'),
+        ]));
+    when(library.watchGenrePlaylists).thenAnswer((_) => Stream.value([
+          vp('rock', 'Rock'),
+          vp('alternative rock', 'Alternative Rock'),
+        ]));
+    vm = DiscoverViewModel(discover: discover, library: library)..init();
+    await Future<void>.delayed(Duration.zero); // let the streams emit
   });
   tearDown(() => vm.dispose());
 
@@ -47,8 +68,8 @@ void main() {
     expect(vm.canRun(DiscoverMode.fromGenres), isTrue);
     expect(vm.canRun(DiscoverMode.youCouldLike), isTrue);
     expect(vm.canRun(DiscoverMode.toTry), isTrue);
-    // Own parameters is not a card mode yet.
-    expect(vm.isReady(DiscoverMode.custom), isFalse);
+    // Own parameters needs at least one chip.
+    expect(vm.isReady(DiscoverMode.custom), isTrue);
     expect(vm.canRun(DiscoverMode.custom), isFalse);
   });
 
@@ -114,7 +135,7 @@ void main() {
         )).called(1);
   });
 
-  test('a mode that is not ready does nothing', () async {
+  test('own parameters without chips does nothing', () async {
     expect(await vm.run(DiscoverMode.custom), isNull);
     verifyNever(() => discover.newFromYourArtists(
           maxTracks: any(named: 'maxTracks'),
@@ -154,5 +175,69 @@ void main() {
         .thenAnswer((_) async => const Result.ok(tryDraft));
 
     expect(await vm.run(DiscoverMode.toTry), tryDraft);
+  });
+
+  group('own parameters', () {
+    const muse = DiscoverParameter.artist(id: 'a1', label: 'Muse');
+    const rock = DiscoverParameter.genre('rock');
+
+    test('suggests artists and genres, names that start first', () {
+      expect(vm.suggestions(''), isEmpty);
+      expect(vm.suggestions('mu').map((p) => p.label), [
+        'Muse',
+        'Mumford & Sons',
+      ]);
+      // "rock" starts with "ro"; "alternative rock" only contains it.
+      expect(vm.suggestions(' RO ').map((p) => p.id), [
+        'rock',
+        'alternative rock',
+      ]);
+      expect(vm.suggestions('ro').first.isArtist, isFalse);
+    });
+
+    test('chosen values are not suggested again', () {
+      vm.addParameter(muse);
+      expect(vm.suggestions('mu').map((p) => p.label), ['Mumford & Sons']);
+    });
+
+    test('adds without repeats, up to the maximum, and removes', () {
+      vm.addParameter(muse);
+      vm.addParameter(muse);
+      expect(vm.selected, [muse]);
+
+      for (var i = 0; i < 10; i++) {
+        vm.addParameter(DiscoverParameter.genre('g$i'));
+      }
+      expect(vm.selected, hasLength(DiscoverViewModel.maxParameters));
+      expect(vm.canAddParameter, isFalse);
+
+      vm.removeParameter(muse);
+      expect(vm.selected, isNot(contains(muse)));
+      expect(vm.canAddParameter, isTrue);
+    });
+
+    test('runs with artist names and genres and renames the draft',
+        () async {
+      when(() => discover.fromOwnParameters(
+            artists: any(named: 'artists'),
+            genres: any(named: 'genres'),
+            maxTracks: any(named: 'maxTracks'),
+          )).thenAnswer((_) async => const Result.ok(
+            PlaylistDraft(name: 'Own parameters', tracks: [track]),
+          ));
+      vm.addParameter(muse);
+      vm.addParameter(rock);
+      expect(vm.canRun(DiscoverMode.custom), isTrue);
+
+      final result = await vm.run(DiscoverMode.custom);
+
+      expect(result?.name, 'Rock · Muse');
+      expect(result?.tracks, [track]);
+      verify(() => discover.fromOwnParameters(
+            artists: ['Muse'],
+            genres: ['rock'],
+            maxTracks: any(named: 'maxTracks'),
+          )).called(1);
+    });
   });
 }
