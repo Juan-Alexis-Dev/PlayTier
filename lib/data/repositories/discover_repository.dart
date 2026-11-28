@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../../domain/engines/genre_cleaner.dart';
 import '../../domain/models/discover_mode.dart';
 import '../../domain/models/playlist_draft.dart';
@@ -8,6 +10,9 @@ import '../services/lastfm/lastfm_service.dart';
 import '../services/local/app_database.dart';
 import '../services/spotify/dto/spotify_playlist_item_dto.dart';
 import '../services/spotify/spotify_api_service.dart';
+
+/// Shuffles [list] in place. Injected so tests can keep the order.
+typedef Shuffler = void Function(List<Object?> list);
 
 /// Discover (FR-10): turns Last.fm suggestions into Spotify tracks the user
 /// does not have yet.
@@ -20,18 +25,29 @@ import '../services/spotify/spotify_api_service.dart';
 ///    with the same name and artist (FR-10.6);
 /// 3. drops tracks whose Spotify id is in the main playlist, and
 ///    duplicates (same id, or same song from another album).
+///
+/// Variety: every run picks its seeds (artists, genres, favourite tracks)
+/// at random from a larger pool of the best ones, and shuffles each
+/// source's tracks, so running a mode again gives a different list.
 class DiscoverRepository {
   DiscoverRepository({
     required this._api,
     required this._db,
     required this._lastFm,
-  });
+    Shuffler? shuffle,
+  }) : _shuffle = shuffle ?? _randomShuffle;
 
   final SpotifyApiService _api;
   final AppDatabase _db;
 
   /// Null when no Last.fm API key is configured.
   final LastFmService? _lastFm;
+
+  /// Shuffles a list in place (random by default; tests pass their own).
+  final Shuffler _shuffle;
+
+  static final _random = Random();
+  static void _randomShuffle(List<Object?> list) => list.shuffle(_random);
 
   /// Default size of a discover playlist.
   static const defaultMaxTracks = 50;
@@ -42,41 +58,55 @@ class DiscoverRepository {
   /// Spotify searches sent at the same time.
   static const _parallelSearches = 5;
 
-  /// Mode 1: user's artists with the most tracks in the main playlist.
+  /// Mode 1: user's artists with the most tracks in the main playlist,
+  /// [artistsPerRun] of them picked at random each run.
+  static const artistPool = 25;
   static const artistsPerRun = 10;
 
   /// Mode 1: Last.fm top tracks requested per artist. Most popular ones
   /// are often owned already, so this is larger than what is kept.
   static const tracksPerArtist = 15;
 
-  /// Mode 2: genres with the most tracks in the main playlist.
+  /// Mode 2: genres with the most tracks in the main playlist,
+  /// [genresPerRun] of them picked at random each run.
+  static const genrePool = 10;
   static const genresPerRun = 5;
 
-  /// Mode 2: user's artists of each genre whose top tracks are used.
+  /// Mode 2: user's artists of each genre (top [artistsPerGenrePool]),
+  /// [artistsPerGenre] of them picked at random.
+  static const artistsPerGenrePool = 5;
   static const artistsPerGenre = 2;
 
   /// Mode 2: Last.fm top tracks requested per genre (any artist).
   static const tracksPerTag = 30;
 
-  /// Mode 3: favourite tracks (highest level) used as seeds.
+  /// Mode 3: favourite tracks (highest level) used as seeds, picked at
+  /// random from the top [seedTrackPool].
+  static const seedTrackPool = 20;
   static const seedTracksPerRun = 5;
 
   /// Mode 3: Last.fm similar tracks requested per seed track.
   static const similarTracksPerSeed = 20;
 
-  /// Mode 3: user's top artists used as seeds.
+  /// Mode 3: user's top artists used as seeds, picked at random from the
+  /// top [seedArtistPool].
+  static const seedArtistPool = 15;
   static const seedArtistsPerRun = 5;
 
   /// Mode 3: Last.fm similar artists requested per seed artist.
   static const similarArtistsPerSeed = 10;
 
-  /// Mode 3: new artists (not in the library) whose top tracks are used.
+  /// Mode 3: new artists (not in the library) whose top tracks are used,
+  /// picked at random from the [newArtistPool] best matches.
+  static const newArtistPool = 15;
   static const newArtistsPerRun = 5;
 
   /// Mode 3: top tracks requested per new artist.
   static const tracksPerNewArtist = 5;
 
-  /// Mode 3: user's top genres used as seeds.
+  /// Mode 3: user's top genres used as seeds, picked at random from the
+  /// top [seedGenrePool].
+  static const seedGenrePool = 8;
   static const seedGenresPerRun = 3;
 
   /// Mode 3: similar genres (not the seeds) whose top tracks are used.
@@ -117,14 +147,16 @@ class DiscoverRepository {
     if (lastFm == null) return Result.error(_noLastFm);
 
     try {
-      artists ??= await _topArtistNames(artistsPerRun);
+      artists ??= _pick(await _topArtistNames(artistPool), artistsPerRun);
       final topTracks = await Future.wait([
         for (final artist in artists)
           lastFm.getArtistTopTracks(artist, limit: tracksPerArtist),
       ]);
       // Drop owned tracks before mixing, so every artist keeps its turn.
       final owned = (await _ownedSongs()).keys;
-      final fresh = [for (final list in topTracks) _fresh(list, owned)];
+      final fresh = [
+        for (final list in topTracks) _shuffled(_fresh(list, owned)),
+      ];
       return _draft(
         DiscoverMode.fromArtists,
         await matchTracks(interleave(fresh), maxTracks: maxTracks),
@@ -156,11 +188,15 @@ class DiscoverRepository {
     if (lastFm == null) return Result.error(_noLastFm);
 
     try {
-      genres ??= await _topGenres(genresPerRun);
-      final artistsByGenre = await _topArtistsOfGenres(
+      genres ??= _pick(await _topGenres(genrePool), genresPerRun);
+      final artistPools = await _topArtistsOfGenres(
         genres,
-        perGenre: artistsPerGenre,
+        perGenre: artistsPerGenrePool,
       );
+      final artistsByGenre = {
+        for (final MapEntry(:key, :value) in artistPools.entries)
+          key: _pick(value, artistsPerGenre),
+      };
       // An artist in several genres is asked for only once.
       final artists = {
         for (final genre in genres) ...?artistsByGenre[genre],
@@ -182,11 +218,11 @@ class DiscoverRepository {
         for (final genre in genres)
           interleave([
             for (final artist in artistsByGenre[genre] ?? const <String>[])
-              _fresh(byArtist[artist]!, owned),
+              _shuffled(_fresh(byArtist[artist]!, owned)),
           ]),
       ]);
       final fromAnyArtist = interleave([
-        for (final list in byTag) _fresh(list, owned),
+        for (final list in byTag) _shuffled(_fresh(list, owned)),
       ]);
 
       // Part 1, up to half of the list.
@@ -299,9 +335,12 @@ class DiscoverRepository {
     if (lastFm == null) return Result.error(_noLastFm);
 
     try {
-      final seedTracks = await _seedTracks(seedTracksPerRun);
-      final seedArtists = await _topArtistNames(seedArtistsPerRun);
-      final seedGenres = await _topGenres(seedGenresPerRun);
+      final seedTracks =
+          _pick(await _seedTracks(seedTrackPool), seedTracksPerRun);
+      final seedArtists =
+          _pick(await _topArtistNames(seedArtistPool), seedArtistsPerRun);
+      final seedGenres =
+          _pick(await _topGenres(seedGenrePool), seedGenresPerRun);
 
       // Round 1: what is similar to the seeds.
       final similarTracks = await Future.wait([
@@ -320,13 +359,17 @@ class DiscoverRepository {
         for (final genre in seedGenres) lastFm.getSimilarTags(genre),
       ]);
 
-      final newArtists = rankNewArtists(
-        similarArtists,
-        known: await _libraryArtistNames(),
-      ).take(newArtistsPerRun).toList();
-      final newGenres = _newGenres(similarTags, seeds: seedGenres)
-          .take(newGenresPerRun)
-          .toList();
+      final newArtists = _pick(
+        rankNewArtists(
+          similarArtists,
+          known: await _libraryArtistNames(),
+        ).take(newArtistPool).toList(),
+        newArtistsPerRun,
+      );
+      final newGenres = _pick(
+        _newGenres(similarTags, seeds: seedGenres),
+        newGenresPerRun,
+      );
 
       // Round 2: top tracks of the new artists and genres.
       final artistTracks = await Future.wait([
@@ -340,7 +383,9 @@ class DiscoverRepository {
 
       final owned = (await _ownedSongs()).keys;
       List<LastFmTrack> mixed(List<List<LastFmTrack>> lists) =>
-          interleave([for (final list in lists) _fresh(list, owned)]);
+          interleave([
+            for (final list in lists) _shuffled(_fresh(list, owned)),
+          ]);
 
       return _draft(
         DiscoverMode.youCouldLike,
@@ -364,9 +409,9 @@ class DiscoverRepository {
   /// the library: no artist you have, no genre you have. Mixes three
   /// sources, one track of each per turn:
   /// 1. chart top tracks;
-  /// 2. top tracks of the first [chartArtistsPerRun] chart artists;
-  /// 3. top tracks of the first [chartGenresPerRun] chart genres (tags
-  ///    that are not genres, like "seen live", are skipped).
+  /// 2. top tracks of [chartArtistsPerRun] chart artists picked at random;
+  /// 3. top tracks of [chartGenresPerRun] chart genres picked at random
+  ///    (tags that are not genres, like "seen live", are skipped).
   Future<Result<PlaylistDraft>> musicToTry({
     int maxTracks = defaultMaxTracks,
   }) async {
@@ -381,18 +426,19 @@ class DiscoverRepository {
       final chartArtists = await lastFm.getChartTopArtists(limit: chartSize);
       final chartTags = await lastFm.getChartTopTags(limit: chartSize);
 
-      final newArtists = [
+      // Random picks among every chart artist/genre that is new to you.
+      final newArtists = _pick([
         for (final artist in chartArtists)
           if (!knownArtists.contains(normalize(artist))) artist,
-      ].take(chartArtistsPerRun).toList();
-      final newGenres = [
+      ], chartArtistsPerRun);
+      final newGenres = _pick([
         for (final genre in GenreCleaner.clean(
           [for (final tag in chartTags) (name: tag, count: 0)],
           artistName: '',
           limit: null,
         ))
           if (!knownGenres.contains(normalize(genre))) genre,
-      ].take(chartGenresPerRun).toList();
+      ], chartGenresPerRun);
 
       final artistTracks = await Future.wait([
         for (final artist in newArtists)
@@ -405,10 +451,10 @@ class DiscoverRepository {
 
       // Not owned and not by an artist of the library.
       final owned = (await _ownedSongs()).keys;
-      List<LastFmTrack> outside(List<LastFmTrack> tracks) => [
+      List<LastFmTrack> outside(List<LastFmTrack> tracks) => _shuffled([
             for (final t in _fresh(tracks, owned))
               if (!knownArtists.contains(normalize(t.artist))) t,
-          ];
+          ]);
 
       return _draft(
         DiscoverMode.toTry,
@@ -626,6 +672,18 @@ class DiscoverRepository {
       for (final tag in interleave(similar))
         if (seen.add(tag.toLowerCase())) tag.toLowerCase(),
     ];
+  }
+
+  /// [count] items of [pool] picked at random (the first ones when the
+  /// shuffle keeps the order, as in tests).
+  List<T> _pick<T>(List<T> pool, int count) =>
+      _shuffled(pool).take(count).toList();
+
+  /// A shuffled copy of [list].
+  List<T> _shuffled<T>(List<T> list) {
+    final copy = List.of(list);
+    _shuffle(copy);
+    return copy;
   }
 
   /// [tracks] without the songs whose key is in [owned].
