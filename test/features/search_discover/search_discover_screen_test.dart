@@ -1,11 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:playtier/data/repositories/discover_repository.dart';
 import 'package:playtier/data/repositories/library_repository.dart';
 import 'package:playtier/data/repositories/search_repository.dart';
+import 'package:playtier/domain/models/playlist_draft.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/search_result.dart';
 import 'package:playtier/domain/models/track.dart';
+import 'package:playtier/features/search_discover/discover_view_model.dart';
 import 'package:playtier/features/search_discover/search_discover_screen.dart';
 import 'package:playtier/features/search_discover/search_view_model.dart';
 import 'package:provider/provider.dart';
@@ -13,6 +16,8 @@ import 'package:provider/provider.dart';
 class MockSearch extends Mock implements SearchRepository {}
 
 class MockLibrary extends Mock implements LibraryRepository {}
+
+class MockDiscover extends Mock implements DiscoverRepository {}
 
 SearchResult result(String id, {bool inMain = false}) => SearchResult(
       track: Track(
@@ -31,21 +36,31 @@ SearchResult result(String id, {bool inMain = false}) => SearchResult(
 void main() {
   late MockSearch search;
   late MockLibrary library;
+  late MockDiscover discover;
 
   setUp(() {
     search = MockSearch();
     library = MockLibrary();
+    discover = MockDiscover();
+    when(() => discover.isAvailable).thenReturn(true);
   });
 
   Future<void> pumpScreen(WidgetTester tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: ChangeNotifierProvider(
-          create: (_) => SearchViewModel(
-            search: search,
-            library: library,
-            debounce: Duration.zero,
-          ),
+        home: MultiProvider(
+          providers: [
+            ChangeNotifierProvider(
+              create: (_) => SearchViewModel(
+                search: search,
+                library: library,
+                debounce: Duration.zero,
+              ),
+            ),
+            ChangeNotifierProvider(
+              create: (_) => DiscoverViewModel(discover: discover),
+            ),
+          ],
           child: const SearchDiscoverScreen(),
         ),
       ),
@@ -57,10 +72,49 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('shows the hint before searching', (tester) async {
+  testWidgets('shows the Discover cards before searching', (tester) async {
     await pumpScreen(tester);
 
-    expect(find.textContaining('Search Spotify by track'), findsOneWidget);
+    expect(find.text('Want new music? Try these:'), findsOneWidget);
+    for (final mode in DiscoverViewModel.cardModes) {
+      expect(find.text(mode.title), findsOneWidget);
+    }
+    // Only mode 1 is ready in this version.
+    expect(find.text('Coming soon'), findsNWidgets(3));
+  });
+
+  testWidgets('Discover is replaced by a message without Last.fm',
+      (tester) async {
+    when(() => discover.isAvailable).thenReturn(false);
+    await pumpScreen(tester);
+
+    expect(find.textContaining('Last.fm API key'), findsOneWidget);
+    expect(find.text('Want new music? Try these:'), findsNothing);
+  });
+
+  testWidgets('a mode with no new tracks shows a message', (tester) async {
+    when(() => discover.newFromYourArtists(
+          maxTracks: any(named: 'maxTracks'),
+        )).thenAnswer(
+      (_) async => const Result.ok(PlaylistDraft(name: 'x', tracks: [])),
+    );
+    await pumpScreen(tester);
+
+    await tester.tap(find.text('New music from your artists'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(DiscoverViewModel.emptyText), findsOneWidget);
+  });
+
+  testWidgets('typing hides the Discover cards', (tester) async {
+    when(() => search.search('muse', offset: 0))
+        .thenAnswer((_) async => Result.ok([result('t1')]));
+    await pumpScreen(tester);
+
+    await type(tester, 'muse');
+
+    expect(find.text('Want new music? Try these:'), findsNothing);
+    expect(find.text('Song t1'), findsOneWidget);
   });
 
   testWidgets('shows results with "Add" or the in-main check',

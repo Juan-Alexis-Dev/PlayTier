@@ -16,6 +16,7 @@ import '../features/playlist/playlist_screen.dart';
 import '../features/playlist/playlist_view_model.dart';
 import '../features/preview/preview_screen.dart';
 import '../features/preview/preview_view_model.dart';
+import '../features/search_discover/discover_view_model.dart';
 import '../features/search_discover/search_discover_screen.dart';
 import '../features/search_discover/search_view_model.dart';
 import '../features/settings/settings_screen.dart';
@@ -36,6 +37,10 @@ class AppRoutes {
 
   /// Needs a `PlaylistDraft` as `extra`.
   static const preview = '/home/preview';
+
+  /// Preview of a Discover playlist, inside the Search tab (FR-10.7).
+  /// Needs a `PlaylistDraft` as `extra`.
+  static const searchPreview = '/search/preview';
 
   /// Search to fill a playlist (FR-9.4). Needs an `AddMusicTarget` as
   /// `extra`.
@@ -160,21 +165,7 @@ GoRouter createRouter({
                     child: const PlaylistScreen(),
                   ),
                 ),
-                GoRoute(
-                  path: 'preview',
-                  // No draft (e.g. a restored route): back to Home.
-                  redirect: (context, state) =>
-                      state.extra is PlaylistDraft ? null : AppRoutes.home,
-                  builder: (context, state) => ChangeNotifierProvider(
-                    create: (context) => PreviewViewModel(
-                      draft: state.extra! as PlaylistDraft,
-                      library: context.read(),
-                      playback: context.read(),
-                      playlists: context.read(),
-                    )..init(),
-                    child: const PreviewScreen(),
-                  ),
-                ),
+                _previewRoute(fallback: AppRoutes.home),
                 GoRoute(
                   path: 'add-music',
                   // No target (e.g. a restored route): back to Home.
@@ -201,13 +192,22 @@ GoRouter createRouter({
           StatefulShellBranch(routes: [
             GoRoute(
               path: AppRoutes.search,
-              builder: (context, state) => ChangeNotifierProvider(
-                create: (context) => SearchViewModel(
-                  search: context.read(),
-                  library: context.read(),
-                ),
+              builder: (context, state) => MultiProvider(
+                providers: [
+                  ChangeNotifierProvider(
+                    create: (context) => SearchViewModel(
+                      search: context.read(),
+                      library: context.read(),
+                    ),
+                  ),
+                  ChangeNotifierProvider(
+                    create: (context) =>
+                        DiscoverViewModel(discover: context.read()),
+                  ),
+                ],
                 child: const SearchDiscoverScreen(),
               ),
+              routes: [_previewRoute(fallback: AppRoutes.search)],
             ),
           ]),
           StatefulShellBranch(routes: [
@@ -288,3 +288,21 @@ GoRouter createRouter({
     ],
   );
 }
+
+/// Preview of a [PlaylistDraft] passed as `extra` (FR-8). Used under Home
+/// (filters) and under Search (Discover); without a draft (e.g. a
+/// restored route) it redirects to [fallback].
+GoRoute _previewRoute({required String fallback}) => GoRoute(
+      path: 'preview',
+      redirect: (context, state) =>
+          state.extra is PlaylistDraft ? null : fallback,
+      builder: (context, state) => ChangeNotifierProvider(
+        create: (context) => PreviewViewModel(
+          draft: state.extra! as PlaylistDraft,
+          library: context.read(),
+          playback: context.read(),
+          playlists: context.read(),
+        )..init(),
+        child: const PreviewScreen(),
+      ),
+    );

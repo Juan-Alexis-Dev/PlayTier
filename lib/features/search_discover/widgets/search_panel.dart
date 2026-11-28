@@ -11,10 +11,14 @@ import '../search_view_model.dart';
 /// Shared by the Search & Discover tab and the "Add music" screen of a
 /// playlist. Needs a [SearchViewModel] above it.
 class SearchPanel extends StatefulWidget {
-  const SearchPanel({super.key, this.autofocus = false});
+  const SearchPanel({super.key, this.autofocus = false, this.idle});
 
   /// Opens the keyboard on the search bar (the "Add music" screen).
   final bool autofocus;
+
+  /// Shown instead of the search hint while the search bar is empty
+  /// (the Discover cards in the Search & Discover tab).
+  final Widget? idle;
 
   @override
   State<SearchPanel> createState() => _SearchPanelState();
@@ -87,6 +91,11 @@ class _SearchPanelState extends State<SearchPanel> {
   }
 
   List<Widget> _content(SearchViewModel vm) {
+    final idle = widget.idle;
+    if (idle != null && vm.query.trim().isEmpty) {
+      return [SliverToBoxAdapter(child: idle)];
+    }
+
     final message = _message(vm);
     if (message != null) {
       return [
