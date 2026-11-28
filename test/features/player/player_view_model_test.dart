@@ -306,6 +306,37 @@ void main() {
       expect(vm.addingToMain, isFalse);
     });
 
+    test('after adding, the button is not offered again until the sync',
+        () async {
+      await startPlaying(const {});
+      expect(vm.canAddToMain, isTrue);
+
+      await vm.addToMainPlaylist();
+
+      expect(vm.canAddToMain, isFalse);
+      expect(vm.waitingForSync, isTrue);
+      // A second call does nothing.
+      await vm.addToMainPlaylist();
+      verify(() => library.addToMain('spotify:track:t1')).called(1);
+
+      // The sync brings it in with level 1: stars on, no message.
+      levelRows.add(const {'t1': 1});
+      await settle();
+      expect(vm.waitingForSync, isFalse);
+      expect(vm.currentLevel, 1);
+    });
+
+    test('a failed add offers the button again', () async {
+      when(() => library.addToMain(any()))
+          .thenAnswer((_) async => Result.error(Exception('offline')));
+      await startPlaying(const {});
+
+      await vm.addToMainPlaylist();
+
+      expect(vm.canAddToMain, isTrue);
+      expect(vm.waitingForSync, isFalse);
+    });
+
     test('a failed add returns a message', () async {
       when(() => library.addToMain(any()))
           .thenAnswer((_) async => Result.error(Exception('offline')));

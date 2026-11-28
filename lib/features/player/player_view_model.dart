@@ -43,6 +43,10 @@ class PlayerViewModel extends ChangeNotifier {
   bool _levelsLoaded = false;
   bool _addingToMain = false;
 
+  /// Tracks added from here that the levels do not show yet (the sync can
+  /// take a moment), so the button is not offered twice.
+  final Set<String> _addedUris = {};
+
   /// Current player state; null when nothing is playing.
   PlaybackState? get state => _state;
 
@@ -65,7 +69,19 @@ class PlayerViewModel extends ChangeNotifier {
   /// and "Add to main playlist" is offered (FR-12.4).
   /// Waits for the first levels, so it does not flash on open.
   bool get canAddToMain =>
-      _levelsLoaded && _state != null && currentLevel == null;
+      _levelsLoaded &&
+      _state != null &&
+      currentLevel == null &&
+      !_addedUris.contains(_state?.trackUri);
+
+  /// The current track was added and is waiting for the sync to show it
+  /// in the main playlist (stars still disabled).
+  bool get waitingForSync {
+    final state = _state;
+    return state != null &&
+        currentLevel == null &&
+        _addedUris.contains(state.trackUri);
+  }
 
   /// True while [addToMainPlaylist] runs.
   bool get addingToMain => _addingToMain;
@@ -175,6 +191,7 @@ class PlayerViewModel extends ChangeNotifier {
     notifyListeners();
 
     final result = await _library.addToMain(state.trackUri);
+    if (result case Ok()) _addedUris.add(state.trackUri);
 
     _addingToMain = false;
     notifyListeners();
