@@ -254,22 +254,25 @@ class DiscoverRepository {
       maxTracks: maxTracks ~/ 2,
     );
     if (byArtists case Error(:final error)) return Result.error(error);
-    final artistTracks = (byArtists as Ok<PlaylistDraft>).value.tracks;
+    final artistDraft = (byArtists as Ok<PlaylistDraft>).value;
+    final artistTracks = artistDraft.tracks;
 
     final byGenres = await newFromYourGenres(
       genres: genres,
       maxTracks: maxTracks - artistTracks.length,
     );
     if (byGenres case Error(:final error)) return Result.error(error);
+    final genreDraft = (byGenres as Ok<PlaylistDraft>).value;
     final artistIds = {for (final t in artistTracks) t.id};
     final genreTracks = [
-      for (final t in (byGenres as Ok<PlaylistDraft>).value.tracks)
+      for (final t in genreDraft.tracks)
         if (!artistIds.contains(t.id)) t,
     ];
 
     return Result.ok(PlaylistDraft(
       name: DiscoverMode.custom.title,
       tracks: interleave([artistTracks, genreTracks]),
+      artistNames: {...artistDraft.artistNames, ...genreDraft.artistNames},
     ));
   }
 
@@ -483,10 +486,19 @@ class DiscoverRepository {
       Ok(:final value) => Result.ok(PlaylistDraft(
           name: mode.title,
           tracks: [for (final r in value) r.track],
+          artistNames: artistNamesOf(value),
         )),
       Error(:final error) => Result.error(error),
     };
   }
+
+  /// Artist id → name of every matched track, so the preview can show
+  /// artists that are not in the local database.
+  static Map<String, String> artistNamesOf(List<SearchResult> results) => {
+        for (final r in results)
+          for (final (i, id) in r.track.artistIds.indexed)
+            if (i < r.artistNames.length) id: r.artistNames[i],
+      };
 
   /// Main artists (position 0) by number of tracks in the main playlist,
   /// most first; ties by name.

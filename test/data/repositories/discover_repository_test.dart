@@ -14,6 +14,7 @@ import 'package:playtier/data/services/spotify/spotify_api_service.dart';
 import 'package:playtier/domain/models/playlist_draft.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/search_result.dart';
+import 'package:playtier/domain/models/track.dart';
 
 class MockSpotify extends Mock implements SpotifyApiService {}
 
@@ -878,6 +879,9 @@ void main() {
         draft.tracks.map((t) => t.id),
         ['h1', 'c1', 'k1', 'h2', 'd1', 'j1'],
       );
+      // Artists not in the library travel with the draft (preview names).
+      expect(draft.artistNames, containsPair('ar-h1-0', 'Star A'));
+      expect(draft.artistNames, containsPair('ar-j1-0', 'Band J'));
     });
 
     test('skips your artists and genres (and non-genre tags)', () async {
@@ -1045,6 +1049,10 @@ void main() {
       ));
 
       expect(draft.tracks.map((t) => t.id), ['every', 'songr']);
+      expect(draft.artistNames, {
+        'ar-every-0': 'Placebo',
+        'ar-songr-0': 'Band R',
+      });
     });
 
     test('an error in one part returns Error', () async {
@@ -1056,6 +1064,43 @@ void main() {
         await repo.fromOwnParameters(artists: ['Placebo'], genres: ['rock']),
         isA<Error<PlaylistDraft>>(),
       );
+    });
+  });
+
+  test('artistNamesOf maps every artist id of the results', () {
+    final results = [
+      SearchResult(
+        track: const Track(
+          id: 't1',
+          uri: 'spotify:track:t1',
+          name: 'Song',
+          artistIds: ['a1', 'a2'],
+          albumId: 'al',
+          albumName: 'Album',
+          duration: Duration(minutes: 3),
+        ),
+        artistNames: const ['Muse', 'Guest'],
+        inMain: false,
+      ),
+      SearchResult(
+        track: const Track(
+          id: 't2',
+          uri: 'spotify:track:t2',
+          name: 'Other',
+          artistIds: ['a3', 'a4'],
+          albumId: 'al',
+          albumName: 'Album',
+          duration: Duration(minutes: 3),
+        ),
+        artistNames: const ['Solo'], // fewer names than ids
+        inMain: false,
+      ),
+    ];
+
+    expect(DiscoverRepository.artistNamesOf(results), {
+      'a1': 'Muse',
+      'a2': 'Guest',
+      'a3': 'Solo',
     });
   });
 }

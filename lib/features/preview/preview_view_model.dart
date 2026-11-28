@@ -24,7 +24,8 @@ class PreviewViewModel extends ChangeNotifier {
     required this._playback,
     required this._playlists,
   })  : _name = draft.name,
-        _tracks = List.of(draft.tracks);
+        _tracks = List.of(draft.tracks),
+        _draftArtistNames = draft.artistNames;
 
   final LibraryRepository _library;
   final PlaybackRepository _playback;
@@ -32,6 +33,9 @@ class PreviewViewModel extends ChangeNotifier {
 
   StreamSubscription<Map<String, String>>? _artistsSub;
   Map<String, String> _artistNames = const {};
+
+  /// Names that came with the draft (Discover artists not in the library).
+  final Map<String, String> _draftArtistNames;
 
   String _name;
   final List<Track> _tracks;
@@ -47,8 +51,11 @@ class PreviewViewModel extends ChangeNotifier {
   /// Set once playback started or the playlist was saved.
   PreviewOutcome? get outcome => _outcome;
 
-  PlaylistDraft get draft =>
-      PlaylistDraft(name: _name, tracks: List.unmodifiable(_tracks));
+  PlaylistDraft get draft => PlaylistDraft(
+        name: _name,
+        tracks: List.unmodifiable(_tracks),
+        artistNames: _draftArtistNames,
+      );
 
   bool get canFinish => !_busy && _tracks.isNotEmpty;
 
@@ -56,8 +63,9 @@ class PreviewViewModel extends ChangeNotifier {
   String get nameToSave =>
       _name.trim().isEmpty ? PlaylistNameGenerator.fallback : _name.trim();
 
+  /// Artist names of [track]: from the library, else from the draft.
   String artistsOf(Track track) => track.artistIds
-      .map((id) => _artistNames[id])
+      .map((id) => _artistNames[id] ?? _draftArtistNames[id])
       .whereType<String>()
       .join(', ');
 
@@ -103,7 +111,8 @@ class PreviewViewModel extends ChangeNotifier {
         }
       });
 
-  /// Permanent: creates a real, private playlist in Spotify.
+  /// Permanent: creates a real, private playlist in Spotify. The tracks
+  /// are not added to the main playlist (FR-10.7).
   Future<void> savePermanent() => _finish(() async {
         final created = await _playlists.createPermanent(
           nameToSave,
