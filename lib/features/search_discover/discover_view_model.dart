@@ -16,6 +16,7 @@ class DiscoverViewModel extends ChangeNotifier {
   static const readyModes = {
     DiscoverMode.fromArtists,
     DiscoverMode.fromGenres,
+    DiscoverMode.youCouldLike,
   };
 
   /// The four cards of the 2×2 grid, in order.
@@ -77,6 +78,7 @@ class DiscoverViewModel extends ChangeNotifier {
     return switch (mode) {
       DiscoverMode.fromArtists => _discover.newFromYourArtists(),
       DiscoverMode.fromGenres => _discover.newFromYourGenres(),
+      DiscoverMode.youCouldLike => _discover.musicYouCouldLike(),
       _ => Future.value(Result.error(Exception('$mode is not ready'))),
     };
   }

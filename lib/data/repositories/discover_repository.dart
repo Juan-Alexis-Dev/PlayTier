@@ -57,6 +57,33 @@ class DiscoverRepository {
   /// Mode 2: Last.fm top tracks requested per genre (any artist).
   static const tracksPerTag = 30;
 
+  /// Mode 3: favourite tracks (highest level) used as seeds.
+  static const seedTracksPerRun = 5;
+
+  /// Mode 3: Last.fm similar tracks requested per seed track.
+  static const similarTracksPerSeed = 20;
+
+  /// Mode 3: user's top artists used as seeds.
+  static const seedArtistsPerRun = 5;
+
+  /// Mode 3: Last.fm similar artists requested per seed artist.
+  static const similarArtistsPerSeed = 10;
+
+  /// Mode 3: new artists (not in the library) whose top tracks are used.
+  static const newArtistsPerRun = 5;
+
+  /// Mode 3: top tracks requested per new artist.
+  static const tracksPerNewArtist = 5;
+
+  /// Mode 3: user's top genres used as seeds.
+  static const seedGenresPerRun = 3;
+
+  /// Mode 3: similar genres (not the seeds) whose top tracks are used.
+  static const newGenresPerRun = 3;
+
+  /// Mode 3: top tracks requested per similar genre.
+  static const tracksPerNewGenre = 15;
+
   /// Discover needs Last.fm; the UI hides it when this is false.
   bool get isAvailable => _lastFm != null;
 
@@ -169,6 +196,81 @@ class DiscoverRepository {
           ]),
         Error(:final error) => Result.error(error),
       });
+    } on Exception catch (e) {
+      return Result.error(e);
+    }
+  }
+
+  /// Mode 3, "Music you could like" (FR-10.3): inside your taste.
+  ///
+  /// Mixes three sources, one track of each per turn:
+  /// 1. tracks similar to your favourites (highest level, then most
+  ///    recently added) — `track.getSimilar`;
+  /// 2. top tracks of artists similar to your top artists that are not in
+  ///    your library, best match first — `artist.getSimilar`;
+  /// 3. top tracks of genres similar to your top genres (not the genres
+  ///    themselves) — `tag.getSimilar`, often empty.
+  Future<Result<PlaylistDraft>> musicYouCouldLike({
+    int maxTracks = defaultMaxTracks,
+  }) async {
+    final lastFm = _lastFm;
+    if (lastFm == null) return Result.error(_noLastFm);
+
+    try {
+      final seedTracks = await _seedTracks(seedTracksPerRun);
+      final seedArtists = await _topArtistNames(seedArtistsPerRun);
+      final seedGenres = await _topGenres(seedGenresPerRun);
+
+      // Round 1: what is similar to the seeds.
+      final similarTracks = await Future.wait([
+        for (final seed in seedTracks)
+          lastFm.getSimilarTracks(
+            seed.artist,
+            seed.name,
+            limit: similarTracksPerSeed,
+          ),
+      ]);
+      final similarArtists = await Future.wait([
+        for (final artist in seedArtists)
+          lastFm.getSimilarArtists(artist, limit: similarArtistsPerSeed),
+      ]);
+      final similarTags = await Future.wait([
+        for (final genre in seedGenres) lastFm.getSimilarTags(genre),
+      ]);
+
+      final newArtists = rankNewArtists(
+        similarArtists,
+        known: await _libraryArtistNames(),
+      ).take(newArtistsPerRun).toList();
+      final newGenres = _newGenres(similarTags, seeds: seedGenres)
+          .take(newGenresPerRun)
+          .toList();
+
+      // Round 2: top tracks of the new artists and genres.
+      final artistTracks = await Future.wait([
+        for (final artist in newArtists)
+          lastFm.getArtistTopTracks(artist, limit: tracksPerNewArtist),
+      ]);
+      final genreTracks = await Future.wait([
+        for (final genre in newGenres)
+          lastFm.getTagTopTracks(genre, limit: tracksPerNewGenre),
+      ]);
+
+      final owned = (await _ownedSongs()).keys;
+      List<LastFmTrack> mixed(List<List<LastFmTrack>> lists) =>
+          interleave([for (final list in lists) _fresh(list, owned)]);
+
+      return _draft(
+        DiscoverMode.youCouldLike,
+        await matchTracks(
+          interleave([
+            mixed(similarTracks),
+            mixed(artistTracks),
+            mixed(genreTracks),
+          ]),
+          maxTracks: maxTracks,
+        ),
+      );
     } on Exception catch (e) {
       return Result.error(e);
     }
@@ -295,6 +397,70 @@ class DiscoverRepository {
       if (list.length < perGenre) list.add(row.read<String>('name'));
     }
     return result;
+  }
+
+  /// Favourite tracks of the main playlist with their main artist: highest
+  /// level first, then most recently added.
+  Future<List<LastFmTrack>> _seedTracks(int limit) async {
+    final rows = await _db.customSelect(
+      'SELECT t.name AS name, a.name AS artist '
+      'FROM tracks t '
+      'JOIN track_artists ta ON ta.track_id = t.id AND ta.position = 0 '
+      'JOIN artists a ON a.id = ta.artist_id '
+      'LEFT JOIN track_levels l ON l.track_id = t.id '
+      'ORDER BY COALESCE(l.level, 1) DESC, '
+      't.added_at IS NULL, t.added_at DESC, t.position '
+      'LIMIT $limit',
+    ).get();
+    return [
+      for (final row in rows)
+        (name: row.read<String>('name'), artist: row.read<String>('artist')),
+    ];
+  }
+
+  /// Normalized names of every artist in the library.
+  Future<Set<String>> _libraryArtistNames() async {
+    final rows = await _db.select(_db.artists).get();
+    return {for (final row in rows) normalize(row.name)};
+  }
+
+  /// Similar artists from several seeds, best total match first, without
+  /// the [known] (normalized) names. Ties keep the order of appearance.
+  static List<String> rankNewArtists(
+    List<List<LastFmSimilarArtist>> similar, {
+    required Set<String> known,
+  }) {
+    final scores = <String, double>{};
+    final names = <String, String>{};
+    for (final list in similar) {
+      for (final artist in list) {
+        final key = normalize(artist.name);
+        if (known.contains(key)) continue;
+        names.putIfAbsent(key, () => artist.name);
+        scores[key] = (scores[key] ?? 0) + artist.match;
+      }
+    }
+    final keys = scores.keys.toList();
+    // Stable sort: `keys` is in order of appearance.
+    final order = {for (final (i, k) in keys.indexed) k: i};
+    keys.sort((a, b) {
+      final byScore = scores[b]!.compareTo(scores[a]!);
+      return byScore != 0 ? byScore : order[a]!.compareTo(order[b]!);
+    });
+    return [for (final key in keys) names[key]!];
+  }
+
+  /// Similar tags mixed one seed at a time, lower-cased, without repeats
+  /// or the [seeds] themselves.
+  static List<String> _newGenres(
+    List<List<String>> similar, {
+    required List<String> seeds,
+  }) {
+    final seen = {for (final s in seeds) s.toLowerCase()};
+    return [
+      for (final tag in interleave(similar))
+        if (seen.add(tag.toLowerCase())) tag.toLowerCase(),
+    ];
   }
 
   /// [tracks] without the songs whose key is in [owned].
