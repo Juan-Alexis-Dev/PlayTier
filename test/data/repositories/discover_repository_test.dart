@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show InsertMode;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -5,6 +6,7 @@ import 'package:playtier/data/repositories/discover_repository.dart';
 import 'package:playtier/data/services/lastfm/lastfm_api_exception.dart';
 import 'package:playtier/data/services/lastfm/lastfm_service.dart';
 import 'package:playtier/data/services/local/app_database.dart';
+import 'package:playtier/data/services/local/tables.dart';
 import 'package:playtier/data/services/spotify/dto/spotify_artist_dto.dart';
 import 'package:playtier/data/services/spotify/dto/spotify_playlist_item_dto.dart';
 import 'package:playtier/data/services/spotify/spotify_api_exception.dart';
@@ -411,6 +413,178 @@ void main() {
             limit: any(named: 'limit'),
             offset: any(named: 'offset'),
           ));
+    });
+  });
+
+  group('newFromYourGenres', () {
+    Future<void> addTrack(String id, String name, List<String> artistIds) async {
+      await db.into(db.tracks).insert(TracksCompanion.insert(
+            id: id,
+            uri: 'spotify:track:$id',
+            name: name,
+            albumId: 'al',
+            albumName: 'Album',
+            durationMs: 200000,
+            position: 1,
+          ));
+      for (final (i, artistId) in artistIds.indexed) {
+        await db.into(db.trackArtists).insert(TrackArtistsCompanion.insert(
+              trackId: id,
+              artistId: artistId,
+              position: i,
+            ));
+      }
+    }
+
+    Future<void> addArtist(String id, String name, List<String> genres) async {
+      await db.into(db.artists).insert(
+            ArtistsCompanion.insert(id: id, name: name),
+            mode: InsertMode.insertOrIgnore,
+          );
+      for (final genre in genres) {
+        await db.into(db.artistGenres).insert(ArtistGenresCompanion.insert(
+              artistId: id,
+              genre: genre,
+              source: GenreSource.lastFm,
+            ));
+      }
+    }
+
+    void stubLastFm({
+      Map<String, List<LastFmTrack>> byArtist = const {},
+      Map<String, List<LastFmTrack>> byTag = const {},
+    }) {
+      when(() => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer((invocation) async =>
+              byArtist[invocation.positionalArguments.first] ?? const []);
+      when(() => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer((invocation) async =>
+              byTag[invocation.positionalArguments.first] ?? const []);
+    }
+
+    PlaylistDraft draftOf(Result<PlaylistDraft> result) =>
+        (result as Ok<PlaylistDraft>).value;
+
+    setUp(() async {
+      // Muse (setUp above) has "Starlight". Genres:
+      // - alternative: Radiohead (2 tracks), Muse (1), Placebo (1) → 4 tracks
+      // - rock: Muse (1) and Guest, only featured on Placebo's track → 2
+      await addArtist('muse', 'Muse', ['alternative', 'rock']);
+      await addArtist('rh', 'Radiohead', ['alternative']);
+      await addArtist('pl', 'Placebo', ['alternative']);
+      await addArtist('gu', 'Guest', ['rock']);
+      await addTrack('rh1', 'Airbag', ['rh']);
+      await addTrack('rh2', 'No Surprises', ['rh']);
+      await addTrack('pl1', 'Every You', ['pl', 'gu']);
+    });
+
+    test('asks for the top genres and their main artists', () async {
+      stubLastFm();
+
+      await repo.newFromYourGenres();
+
+      // alternative: Radiohead (2), then Muse/Placebo tie → Muse by name.
+      // rock: only Muse is a main artist; Muse is asked once.
+      expect(
+        verify(() => lastFm.getArtistTopTracks(
+              captureAny(),
+              limit: DiscoverRepository.tracksPerArtist,
+            )).captured,
+        ['Radiohead', 'Muse'],
+      );
+      expect(
+        verify(() => lastFm.getTagTopTracks(
+              captureAny(),
+              limit: DiscoverRepository.tracksPerTag,
+            )).captured,
+        ['alternative', 'rock'],
+      );
+    });
+
+    test('first your artists (half), then any artist of the genres',
+        () async {
+      stubLastFm(
+        byArtist: {
+          'Radiohead': [
+            lf('Creep', 'Radiohead'),
+            lf('Karma Police', 'Radiohead'),
+          ],
+          'Muse': [lf('Starlight'), lf('Uprising')], // Starlight is owned
+        },
+        byTag: {
+          'alternative': [lf('Uprising'), lf('Song A', 'Band A')],
+          'rock': [lf('Song B', 'Band B'), lf('Airbag', 'Radiohead')],
+        },
+      );
+      spotify[q('Creep', 'Radiohead')] = [
+        dto('creep', 'Creep', artists: ['Radiohead']),
+      ];
+      spotify[q('Karma Police', 'Radiohead')] = [
+        dto('karma', 'Karma Police', artists: ['Radiohead']),
+      ];
+      spotify[q('Uprising')] = [dto('upr', 'Uprising')];
+      spotify[q('Song A', 'Band A')] = [
+        dto('a', 'Song A', artists: ['Band A']),
+      ];
+      spotify[q('Song B', 'Band B')] = [
+        dto('b', 'Song B', artists: ['Band B']),
+      ];
+
+      final draft = draftOf(await repo.newFromYourGenres(maxTracks: 4));
+
+      expect(draft.name, 'New music from your genres');
+      // Part 1 (2 of 4): Creep, Uprising. Part 2: Uprising is already in
+      // part 1 and Airbag is owned, so Song B, Song A.
+      expect(draft.tracks.map((t) => t.id), ['creep', 'upr', 'b', 'a']);
+    });
+
+    test('part 2 fills the list when part 1 finds less', () async {
+      stubLastFm(byTag: {
+        'alternative': [
+          lf('A1', 'Band'),
+          lf('A2', 'Band'),
+          lf('A3', 'Band'),
+        ],
+      });
+      for (final name in ['A1', 'A2', 'A3']) {
+        spotify[q(name, 'Band')] = [
+          dto(name.toLowerCase(), name, artists: ['Band']),
+        ];
+      }
+
+      final draft = draftOf(await repo.newFromYourGenres(maxTracks: 4));
+
+      expect(draft.tracks.map((t) => t.id), ['a1', 'a2', 'a3']);
+    });
+
+    test('no genres yet returns an empty draft without calls', () async {
+      await db.delete(db.artistGenres).go();
+      stubLastFm();
+
+      expect(draftOf(await repo.newFromYourGenres()).tracks, isEmpty);
+      verifyNever(
+        () => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')),
+      );
+      verifyNever(
+        () => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')),
+      );
+    });
+
+    test('a Last.fm error returns Error', () async {
+      stubLastFm();
+      when(() => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')))
+          .thenThrow(const LastFmApiException(500, 'down'));
+
+      expect(await repo.newFromYourGenres(), isA<Error<PlaylistDraft>>());
+    });
+
+    test('without Last.fm returns Error', () async {
+      final noLastFm = DiscoverRepository(api: api, db: db, lastFm: null);
+
+      expect(
+        await noLastFm.newFromYourGenres(),
+        isA<Error<PlaylistDraft>>(),
+      );
     });
   });
 }
