@@ -946,4 +946,116 @@ void main() {
       expect(await noLastFm.musicToTry(), isA<Error<PlaylistDraft>>());
     });
   });
+
+  group('fromOwnParameters', () {
+    void stubLastFm({
+      Map<String, List<LastFmTrack>> artistTop = const {},
+      Map<String, List<LastFmTrack>> tagTop = const {},
+    }) {
+      when(() => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => artistTop[i.positionalArguments.first] ?? const [],
+      );
+      when(() => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer(
+        (i) async => tagTop[i.positionalArguments.first] ?? const [],
+      );
+    }
+
+    PlaylistDraft draftOf(Result<PlaylistDraft> result) =>
+        (result as Ok<PlaylistDraft>).value;
+
+    setUp(() async {
+      // Muse ("Starlight", setUp above) is "rock".
+      await db.into(db.artistGenres).insert(ArtistGenresCompanion.insert(
+            artistId: 'muse',
+            genre: 'rock',
+            source: GenreSource.lastFm,
+          ));
+      spotify[q('Every You', 'Placebo')] = [
+        dto('every', 'Every You', artists: ['Placebo']),
+      ];
+      spotify[q('Song R', 'Band R')] = [
+        dto('songr', 'Song R', artists: ['Band R']),
+      ];
+    });
+
+    test('no parameters returns an empty draft without calls', () async {
+      final draft = draftOf(await repo.fromOwnParameters());
+
+      expect(draft.tracks, isEmpty);
+      verifyZeroInteractions(lastFm);
+    });
+
+    test('artists only: mode 1 with the chosen artists', () async {
+      stubLastFm(artistTop: {
+        'Placebo': [lf('Every You', 'Placebo')],
+      });
+
+      final draft = draftOf(await repo.fromOwnParameters(
+        artists: ['Placebo'],
+      ));
+
+      expect(draft.name, 'Own parameters');
+      expect(draft.tracks.map((t) => t.id), ['every']);
+      // Not the top artist of the library (Muse).
+      expect(
+        verify(() => lastFm.getArtistTopTracks(
+              captureAny(),
+              limit: any(named: 'limit'),
+            )).captured,
+        ['Placebo'],
+      );
+    });
+
+    test('genres only: mode 2 with the chosen genres', () async {
+      stubLastFm(tagTop: {
+        'rock': [lf('Song R', 'Band R')],
+      });
+
+      final draft = draftOf(await repo.fromOwnParameters(genres: ['rock']));
+
+      expect(draft.name, 'Own parameters');
+      expect(draft.tracks.map((t) => t.id), ['songr']);
+      expect(
+        verify(() => lastFm.getTagTopTracks(
+              captureAny(),
+              limit: any(named: 'limit'),
+            )).captured,
+        ['rock'],
+      );
+    });
+
+    test('both: mixes the two lists without repeats', () async {
+      stubLastFm(
+        artistTop: {
+          'Placebo': [lf('Every You', 'Placebo')],
+        },
+        tagTop: {
+          'rock': [
+            lf('Song R', 'Band R'),
+            lf('Every You', 'Placebo'), // already from the artist part
+          ],
+        },
+      );
+
+      final draft = draftOf(await repo.fromOwnParameters(
+        artists: ['Placebo'],
+        genres: ['rock'],
+      ));
+
+      expect(draft.tracks.map((t) => t.id), ['every', 'songr']);
+    });
+
+    test('an error in one part returns Error', () async {
+      stubLastFm();
+      when(() => lastFm.getTagTopTracks(any(), limit: any(named: 'limit')))
+          .thenThrow(const LastFmApiException(500, 'down'));
+
+      expect(
+        await repo.fromOwnParameters(artists: ['Placebo'], genres: ['rock']),
+        isA<Error<PlaylistDraft>>(),
+      );
+    });
+  });
 }

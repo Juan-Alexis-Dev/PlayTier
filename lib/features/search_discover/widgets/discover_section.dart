@@ -7,8 +7,10 @@ import '../../../domain/models/discover_mode.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../discover_view_model.dart';
 import 'discover_card.dart';
+import 'parameter_chips_input.dart';
 
-/// "Want new music? Try these:" and the 2×2 grid of Discover cards.
+/// "Want new music? Try these:", the own-parameters input and the 2×2
+/// grid of Discover cards.
 ///
 /// Shown in the Search & Discover tab while the search bar is empty.
 /// Needs a [DiscoverViewModel] above it.
@@ -70,6 +72,10 @@ class DiscoverSection extends StatelessWidget {
         children: [
           Text('Want new music? Try these:', style: theme.textTheme.titleLarge),
           const SizedBox(height: 12),
+          ParameterChipsInput(
+            onRun: () => _run(context, DiscoverMode.custom),
+          ),
+          const SizedBox(height: 8),
           row(modes[0], modes[1]),
           const SizedBox(height: 8),
           row(modes[2], modes[3]),

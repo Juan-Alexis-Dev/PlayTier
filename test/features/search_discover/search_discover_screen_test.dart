@@ -4,6 +4,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:playtier/data/repositories/discover_repository.dart';
 import 'package:playtier/data/repositories/library_repository.dart';
 import 'package:playtier/data/repositories/search_repository.dart';
+import 'package:playtier/domain/engines/virtual_playlists.dart';
 import 'package:playtier/domain/models/playlist_draft.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/search_result.dart';
@@ -43,6 +44,17 @@ void main() {
     library = MockLibrary();
     discover = MockDiscover();
     when(() => discover.isAvailable).thenReturn(true);
+    // Suggestions for own parameters.
+    when(library.watchArtistPlaylists).thenAnswer(
+      (_) => Stream.value(const <VirtualPlaylist>[
+        (id: 'a1', name: 'Muse', trackCount: 3, coverUrls: []),
+      ]),
+    );
+    when(library.watchGenrePlaylists).thenAnswer(
+      (_) => Stream.value(const <VirtualPlaylist>[
+        (id: 'rock', name: 'Rock', trackCount: 3, coverUrls: []),
+      ]),
+    );
   });
 
   Future<void> pumpScreen(WidgetTester tester) async {
@@ -58,7 +70,9 @@ void main() {
               ),
             ),
             ChangeNotifierProvider(
-              create: (_) => DiscoverViewModel(discover: discover),
+              create: (_) =>
+                  DiscoverViewModel(discover: discover, library: library)
+                    ..init(),
             ),
           ],
           child: const SearchDiscoverScreen(),
@@ -68,7 +82,14 @@ void main() {
   }
 
   Future<void> type(WidgetTester tester, String text) async {
-    await tester.enterText(find.byType(TextField), text);
+    // The Spotify search bar (the own-parameters field is another one).
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(SearchBar),
+        matching: find.byType(TextField),
+      ),
+      text,
+    );
     await tester.pumpAndSettle();
   }
 
@@ -100,6 +121,8 @@ void main() {
     );
     await pumpScreen(tester);
 
+    // The own-parameters card pushes the grid down.
+    await tester.ensureVisible(find.text('New music from your artists'));
     await tester.tap(find.text('New music from your artists'));
     await tester.pumpAndSettle();
 
@@ -172,5 +195,64 @@ void main() {
     await tester.pumpAndSettle();
 
     verify(() => search.search('muse', offset: 0)).called(2);
+  });
+
+  testWidgets('own parameters: pick a suggestion as a chip and run',
+      (tester) async {
+    when(() => discover.fromOwnParameters(
+          artists: any(named: 'artists'),
+          genres: any(named: 'genres'),
+          maxTracks: any(named: 'maxTracks'),
+        )).thenAnswer(
+      (_) async => const Result.ok(PlaylistDraft(name: 'x', tracks: [])),
+    );
+    await pumpScreen(tester);
+    await tester.pumpAndSettle();
+
+    final discoverButton = find.widgetWithText(FilledButton, 'Discover');
+    expect(tester.widget<FilledButton>(discoverButton).onPressed, isNull);
+
+    final field = find.descendant(
+      of: find.byType(Card).first,
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(field, 'mu');
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Muse'));
+    await tester.pumpAndSettle();
+
+    expect(find.widgetWithText(InputChip, 'Muse'), findsOneWidget);
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+    expect(tester.widget<FilledButton>(discoverButton).onPressed, isNotNull);
+
+    await tester.tap(discoverButton);
+    await tester.pumpAndSettle();
+
+    verify(() => discover.fromOwnParameters(
+          artists: ['Muse'],
+          genres: const [],
+          maxTracks: any(named: 'maxTracks'),
+        )).called(1);
+    expect(find.text(DiscoverViewModel.emptyText), findsOneWidget);
+  });
+
+  testWidgets('removing the chip disables Discover again', (tester) async {
+    await pumpScreen(tester);
+    await tester.pumpAndSettle();
+    final field = find.descendant(
+      of: find.byType(Card).first,
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(field, 'ro');
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'rock'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Remove rock'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(InputChip), findsNothing);
+    final button = find.widgetWithText(FilledButton, 'Discover');
+    expect(tester.widget<FilledButton>(button).onPressed, isNull);
   });
 }

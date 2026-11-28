@@ -106,14 +106,18 @@ class DiscoverRepository {
   /// main playlist, asks Last.fm for each one's top tracks, drops the ones
   /// already owned and mixes the rest one artist at a time (most popular
   /// first), so no artist fills the whole list.
+  ///
+  /// With [artists] (own parameters, FR-10.5) those names are used
+  /// instead of the top artists.
   Future<Result<PlaylistDraft>> newFromYourArtists({
+    List<String>? artists,
     int maxTracks = defaultMaxTracks,
   }) async {
     final lastFm = _lastFm;
     if (lastFm == null) return Result.error(_noLastFm);
 
     try {
-      final artists = await _topArtistNames(artistsPerRun);
+      artists ??= await _topArtistNames(artistsPerRun);
       final topTracks = await Future.wait([
         for (final artist in artists)
           lastFm.getArtistTopTracks(artist, limit: tracksPerArtist),
@@ -141,14 +145,18 @@ class DiscoverRepository {
   ///
   /// Each part mixes genres one at a time. If part 1 finds fewer tracks,
   /// part 2 fills the rest.
+  ///
+  /// With [genres] (own parameters, FR-10.5, lower-case as stored) those
+  /// are used instead of the top genres.
   Future<Result<PlaylistDraft>> newFromYourGenres({
+    List<String>? genres,
     int maxTracks = defaultMaxTracks,
   }) async {
     final lastFm = _lastFm;
     if (lastFm == null) return Result.error(_noLastFm);
 
     try {
-      final genres = await _topGenres(genresPerRun);
+      genres ??= await _topGenres(genresPerRun);
       final artistsByGenre = await _topArtistsOfGenres(
         genres,
         perGenre: artistsPerGenre,
@@ -213,6 +221,64 @@ class DiscoverRepository {
       return Result.error(e);
     }
   }
+
+  /// Own parameters (FR-10.5): mode 1 with [artists] and/or mode 2 with
+  /// [genres].
+  ///
+  /// With both, each mode gets about half of [maxTracks] and the two
+  /// lists are mixed one track at a time, without repeats. The draft is
+  /// named "Own parameters"; the view model renames it after the chips.
+  Future<Result<PlaylistDraft>> fromOwnParameters({
+    List<String> artists = const [],
+    List<String> genres = const [],
+    int maxTracks = defaultMaxTracks,
+  }) async {
+    if (artists.isEmpty && genres.isEmpty) {
+      return Result.ok(
+        PlaylistDraft(name: DiscoverMode.custom.title, tracks: const []),
+      );
+    }
+    if (genres.isEmpty) {
+      return _renamed(
+        await newFromYourArtists(artists: artists, maxTracks: maxTracks),
+      );
+    }
+    if (artists.isEmpty) {
+      return _renamed(
+        await newFromYourGenres(genres: genres, maxTracks: maxTracks),
+      );
+    }
+
+    final byArtists = await newFromYourArtists(
+      artists: artists,
+      maxTracks: maxTracks ~/ 2,
+    );
+    if (byArtists case Error(:final error)) return Result.error(error);
+    final artistTracks = (byArtists as Ok<PlaylistDraft>).value.tracks;
+
+    final byGenres = await newFromYourGenres(
+      genres: genres,
+      maxTracks: maxTracks - artistTracks.length,
+    );
+    if (byGenres case Error(:final error)) return Result.error(error);
+    final artistIds = {for (final t in artistTracks) t.id};
+    final genreTracks = [
+      for (final t in (byGenres as Ok<PlaylistDraft>).value.tracks)
+        if (!artistIds.contains(t.id)) t,
+    ];
+
+    return Result.ok(PlaylistDraft(
+      name: DiscoverMode.custom.title,
+      tracks: interleave([artistTracks, genreTracks]),
+    ));
+  }
+
+  static Result<PlaylistDraft> _renamed(Result<PlaylistDraft> result) =>
+      switch (result) {
+        Ok(:final value) =>
+          Result.ok(value.copyWith(name: DiscoverMode.custom.title)),
+        Error() => result,
+      };
 
   /// Mode 3, "Music you could like" (FR-10.3): inside your taste.
   ///
