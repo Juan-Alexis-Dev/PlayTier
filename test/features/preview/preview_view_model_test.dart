@@ -151,6 +151,36 @@ void main() {
       expect(vm.outcome, PreviewOutcome.saved);
     });
 
+    test('a Discover draft is saved without touching the main playlist',
+        () async {
+      when(() => playlists.createPermanent(any(), any())).thenAnswer(
+        (_) async => const Result.ok(
+          PlaylistSummary(
+            id: 'new2',
+            name: 'Music to try',
+            trackCount: 1,
+            type: PlaylistType.permanent,
+          ),
+        ),
+      );
+      final vm = PreviewViewModel(
+        draft: PlaylistDraft(
+          name: 'Music to try',
+          tracks: [track('x')],
+          artistNames: const {'a1': 'New Artist'},
+        ),
+        library: library,
+        playback: playback,
+        playlists: playlists,
+      )..init();
+
+      await vm.savePermanent();
+
+      expect(vm.outcome, PreviewOutcome.saved);
+      verifyNever(() => library.addToMain(any()));
+      verifyNever(() => library.syncIfChanged(force: any(named: 'force')));
+    });
+
     test('errors become a message', () async {
       when(() => playlists.createPermanent(any(), any()))
           .thenAnswer((_) async => Result.error(Exception('403')));
@@ -174,5 +204,59 @@ void main() {
       track('7', cover: 'c5'),
     ]);
     expect(draft.coverUrls, ['c1', 'c2', 'c3', 'c4']);
+  });
+
+  group('artist names', () {
+    Track discoverTrack() => const Track(
+          id: 'd1',
+          uri: 'spotify:track:d1',
+          name: 'Hit',
+          artistIds: ['a1', 'new'],
+          albumId: 'al',
+          albumName: 'Album',
+          duration: Duration(minutes: 3),
+        );
+
+    PreviewViewModel createWith(Map<String, String> draftNames) =>
+        PreviewViewModel(
+          draft: PlaylistDraft(
+            name: 'x',
+            tracks: [discoverTrack()],
+            artistNames: draftNames,
+          ),
+          library: library,
+          playback: playback,
+          playlists: playlists,
+        )..init();
+
+    test('unknown artists use the names that came with the draft',
+        () async {
+      final vm = createWith(const {'new': 'New Artist'});
+      await Future<void>.delayed(Duration.zero);
+
+      // 'a1' comes from the library ("Artist"), 'new' from the draft.
+      expect(vm.artistsOf(discoverTrack()), 'Artist, New Artist');
+    });
+
+    test('the library name wins over the draft name', () async {
+      final vm = createWith(const {'a1': 'Old Name', 'new': 'New Artist'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(vm.artistsOf(discoverTrack()), 'Artist, New Artist');
+    });
+
+    test('artists with no name anywhere are skipped', () async {
+      final vm = createWith(const {});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(vm.artistsOf(discoverTrack()), 'Artist');
+    });
+
+    test('the edited draft keeps the artist names', () {
+      final vm = createWith(const {'new': 'New Artist'})..rename('Mine');
+
+      expect(vm.draft.name, 'Mine');
+      expect(vm.draft.artistNames, {'new': 'New Artist'});
+    });
   });
 }
