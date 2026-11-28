@@ -158,6 +158,21 @@ class _Content extends StatelessWidget {
             ),
           ),
         ],
+        if (vm.waitingForSync) ...[
+          Text(
+            'Added to your main playlist. The stars turn on in a moment.',
+            textAlign: TextAlign.center,
+            style: text.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: FilledButton.tonalIcon(
+              onPressed: null,
+              icon: Icon(Icons.check),
+              label: Text('Added'),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         _ProgressBar(
           position: vm.position,

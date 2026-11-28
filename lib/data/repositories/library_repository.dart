@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart';
 
 import '../../domain/engines/virtual_playlists.dart';
@@ -14,11 +16,25 @@ class LibraryRepository {
     required this._api,
     required this._db,
     required this._settings,
+    this.addSyncRetries = const [Duration(seconds: 3), Duration(seconds: 10)],
   });
+
+  /// Waits before re-checking the sync when an added track did not show
+  /// up yet. Tests pass an empty list.
+  final List<Duration> addSyncRetries;
 
   final SpotifyApiService _api;
   final AppDatabase _db;
   final SettingsRepository _settings;
+
+  /// Tracks added in this session that the local copy does not have yet.
+  /// Spotify can report the old `snapshot_id` for a moment after an add,
+  /// so the sync may not bring the track in right away; without this, a
+  /// second tap would add it again.
+  final Set<String> _pendingAdds = {};
+
+  /// Adds in progress, so parallel taps share one request.
+  final Map<String, Future<Result<void>>> _addsInFlight = {};
 
   /// Tracks of the main playlist in playlist order. Emits again whenever
   /// a sync changes the database.
@@ -69,9 +85,24 @@ class LibraryRepository {
   /// Adds [trackUri] to the end of the main playlist in Spotify, then
   /// syncs so it appears here with level 1 (FR-12.4, FR-2.3).
   ///
-  /// Does nothing if the track is already in the main playlist. If only
-  /// the sync fails, the result is still ok: the next sync brings it in.
-  Future<Result<void>> addToMain(String trackUri) async {
+  /// Does nothing if the track is already in the main playlist, or was
+  /// already added in this session and is waiting for a sync. Parallel
+  /// calls for the same track share one request. If only the sync fails,
+  /// the result is still ok: the next sync brings it in.
+  Future<Result<void>> addToMain(String trackUri) {
+    // Block body on purpose: `=> _addsInFlight.remove(...)` would return
+    // this same future, and whenComplete would wait for itself forever.
+    return _addsInFlight[trackUri] ??=
+        _addToMain(trackUri).whenComplete(() {
+      _addsInFlight.remove(trackUri);
+    });
+  }
+
+  /// Whether [trackUri] was added in this session and the local copy does
+  /// not show it yet.
+  bool isPendingAdd(String trackUri) => _pendingAdds.contains(trackUri);
+
+  Future<Result<void>> _addToMain(String trackUri) async {
     try {
       final playlistId = await _settings.getMainPlaylistId();
       if (playlistId == null) {
@@ -82,13 +113,29 @@ class LibraryRepository {
             ..where((t) => t.uri.equals(trackUri))
             ..limit(1))
           .getSingleOrNull();
-      if (existing != null) return const Result.ok(null);
+      if (existing != null) {
+        _pendingAdds.remove(trackUri);
+        return const Result.ok(null);
+      }
+      if (_pendingAdds.contains(trackUri)) return const Result.ok(null);
 
       await _api.addPlaylistItems(playlistId, [trackUri]);
+      _pendingAdds.add(trackUri);
       await syncIfChanged();
+      if (_pendingAdds.contains(trackUri)) unawaited(_retrySync(trackUri));
       return const Result.ok(null);
     } on Exception catch (e) {
       return Result.error(e);
+    }
+  }
+
+  /// Syncs again after each of [addSyncRetries] until [trackUri] is in the
+  /// local copy. Errors are ignored: a later sync brings it in.
+  Future<void> _retrySync(String trackUri) async {
+    for (final delay in addSyncRetries) {
+      await Future<void>.delayed(delay);
+      if (!_pendingAdds.contains(trackUri)) return;
+      await syncIfChanged();
     }
   }
 
@@ -119,6 +166,13 @@ class LibraryRepository {
 
       final items = await _api.getPlaylistItems(playlistId);
       await _write(playlistId, snapshotId ?? '', items);
+      // A full read is the truth: added tracks are no longer pending
+      // (and a manual sync lets a track removed in Spotify be added again).
+      if (force) {
+        _pendingAdds.clear();
+      } else {
+        _pendingAdds.removeAll(items.map((item) => item.uri));
+      }
       return const Result.ok(true);
     } on Exception catch (e) {
       return Result.error(e);
