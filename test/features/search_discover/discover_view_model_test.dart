@@ -44,8 +44,9 @@ void main() {
 
   test('only ready modes can run', () {
     expect(vm.canRun(DiscoverMode.fromArtists), isTrue);
-    expect(vm.isReady(DiscoverMode.fromGenres), isFalse);
-    expect(vm.canRun(DiscoverMode.fromGenres), isFalse);
+    expect(vm.canRun(DiscoverMode.fromGenres), isTrue);
+    expect(vm.isReady(DiscoverMode.youCouldLike), isFalse);
+    expect(vm.canRun(DiscoverMode.youCouldLike), isFalse);
   });
 
   test('nothing can run without Last.fm', () {
@@ -112,6 +113,21 @@ void main() {
 
   test('a mode that is not ready does nothing', () async {
     expect(await vm.run(DiscoverMode.toTry), isNull);
+    verifyNever(() => discover.newFromYourArtists(
+          maxTracks: any(named: 'maxTracks'),
+        ));
+  });
+
+  test('fromGenres runs newFromYourGenres', () async {
+    const genresDraft = PlaylistDraft(
+      name: 'New music from your genres',
+      tracks: [track],
+    );
+    when(() => discover.newFromYourGenres(
+          maxTracks: any(named: 'maxTracks'),
+        )).thenAnswer((_) async => const Result.ok(genresDraft));
+
+    expect(await vm.run(DiscoverMode.fromGenres), genresDraft);
     verifyNever(() => discover.newFromYourArtists(
           maxTracks: any(named: 'maxTracks'),
         ));

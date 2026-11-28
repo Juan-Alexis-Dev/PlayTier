@@ -48,6 +48,15 @@ class DiscoverRepository {
   /// are often owned already, so this is larger than what is kept.
   static const tracksPerArtist = 15;
 
+  /// Mode 2: genres with the most tracks in the main playlist.
+  static const genresPerRun = 5;
+
+  /// Mode 2: user's artists of each genre whose top tracks are used.
+  static const artistsPerGenre = 2;
+
+  /// Mode 2: Last.fm top tracks requested per genre (any artist).
+  static const tracksPerTag = 30;
+
   /// Discover needs Last.fm; the UI hides it when this is false.
   bool get isAvailable => _lastFm != null;
 
@@ -71,17 +80,95 @@ class DiscoverRepository {
       ]);
       // Drop owned tracks before mixing, so every artist keeps its turn.
       final owned = (await _ownedSongs()).keys;
-      final fresh = [
-        for (final list in topTracks)
-          [
-            for (final t in list)
-              if (!owned.contains(songKey(t.name, t.artist))) t,
-          ],
-      ];
+      final fresh = [for (final list in topTracks) _fresh(list, owned)];
       return _draft(
         DiscoverMode.fromArtists,
         await matchTracks(interleave(fresh), maxTracks: maxTracks),
       );
+    } on Exception catch (e) {
+      return Result.error(e);
+    }
+  }
+
+  /// Mode 2, "New music from your genres" (FR-10.2).
+  ///
+  /// Takes the [genresPerRun] genres with the most tracks in the main
+  /// playlist and builds the list in two parts, about half each:
+  /// 1. top tracks (Last.fm) of the user's own [artistsPerGenre] artists
+  ///    of each genre that the user does not have;
+  /// 2. then the genre's most popular tracks from any artist
+  ///    (`tag.getTopTracks`).
+  ///
+  /// Each part mixes genres one at a time. If part 1 finds fewer tracks,
+  /// part 2 fills the rest.
+  Future<Result<PlaylistDraft>> newFromYourGenres({
+    int maxTracks = defaultMaxTracks,
+  }) async {
+    final lastFm = _lastFm;
+    if (lastFm == null) return Result.error(_noLastFm);
+
+    try {
+      final genres = await _topGenres(genresPerRun);
+      final artistsByGenre = await _topArtistsOfGenres(
+        genres,
+        perGenre: artistsPerGenre,
+      );
+      // An artist in several genres is asked for only once.
+      final artists = {
+        for (final genre in genres) ...?artistsByGenre[genre],
+      }.toList();
+
+      final responses = await Future.wait([
+        for (final artist in artists)
+          lastFm.getArtistTopTracks(artist, limit: tracksPerArtist),
+        for (final genre in genres)
+          lastFm.getTagTopTracks(genre, limit: tracksPerTag),
+      ]);
+      final byArtist = {
+        for (final (i, artist) in artists.indexed) artist: responses[i],
+      };
+      final byTag = responses.sublist(artists.length);
+
+      final owned = (await _ownedSongs()).keys;
+      final fromYourArtists = interleave([
+        for (final genre in genres)
+          interleave([
+            for (final artist in artistsByGenre[genre] ?? const <String>[])
+              _fresh(byArtist[artist]!, owned),
+          ]),
+      ]);
+      final fromAnyArtist = interleave([
+        for (final list in byTag) _fresh(list, owned),
+      ]);
+
+      // Part 1, up to half of the list.
+      final first = await matchTracks(
+        fromYourArtists,
+        maxTracks: maxTracks ~/ 2,
+      );
+      if (first case Error(:final error)) return Result.error(error);
+      final firstTracks = (first as Ok<List<SearchResult>>).value;
+
+      // Part 2 fills the rest, without repeating part 1.
+      final firstIds = {for (final r in firstTracks) r.track.id};
+      final firstKeys = {
+        for (final r in firstTracks) songKey(r.track.name, r.artistNames.first),
+      };
+      final second = await matchTracks(
+        [
+          for (final c in fromAnyArtist)
+            if (!firstKeys.contains(songKey(c.name, c.artist))) c,
+        ],
+        maxTracks: maxTracks - firstTracks.length,
+      );
+      return _draft(DiscoverMode.fromGenres, switch (second) {
+        Ok(:final value) => Result.ok([
+            ...firstTracks,
+            for (final r in value)
+              if (!firstIds.contains(r.track.id)) r,
+          ]),
+        Error(:final error) => Result.error(error),
+      });
     } on Exception catch (e) {
       return Result.error(e);
     }
@@ -166,6 +253,59 @@ class DiscoverRepository {
     ).get();
     return [for (final row in rows) row.read<String>('name')];
   }
+
+  /// Genres by number of tracks in the main playlist, most first; ties by
+  /// name. A track counts for a genre when any of its artists has it
+  /// (same rule as the Genres tab).
+  Future<List<String>> _topGenres(int limit) async {
+    final rows = await _db.customSelect(
+      'SELECT ag.genre AS genre, COUNT(DISTINCT ta.track_id) AS c '
+      'FROM artist_genres ag '
+      'JOIN track_artists ta ON ta.artist_id = ag.artist_id '
+      'GROUP BY ag.genre '
+      'ORDER BY c DESC, ag.genre '
+      'LIMIT $limit',
+    ).get();
+    return [for (final row in rows) row.read<String>('genre')];
+  }
+
+  /// For each of [genres], its main artists (position 0) with the most
+  /// tracks in the main playlist, up to [perGenre]; ties by name.
+  Future<Map<String, List<String>>> _topArtistsOfGenres(
+    List<String> genres, {
+    required int perGenre,
+  }) async {
+    if (genres.isEmpty) return {};
+    final rows = await _db.customSelect(
+      'SELECT ag.genre AS genre, a.name AS name, COUNT(*) AS c '
+      'FROM artist_genres ag '
+      'JOIN artists a ON a.id = ag.artist_id '
+      'JOIN track_artists ta ON ta.artist_id = a.id '
+      'WHERE ta.position = 0 '
+      'GROUP BY ag.genre, a.id '
+      'ORDER BY c DESC, a.name',
+    ).get();
+
+    final wanted = genres.toSet();
+    final result = <String, List<String>>{};
+    for (final row in rows) {
+      final genre = row.read<String>('genre');
+      if (!wanted.contains(genre)) continue;
+      final list = result.putIfAbsent(genre, () => []);
+      if (list.length < perGenre) list.add(row.read<String>('name'));
+    }
+    return result;
+  }
+
+  /// [tracks] without the songs whose key is in [owned].
+  static List<LastFmTrack> _fresh(
+    List<LastFmTrack> tracks,
+    Set<String> owned,
+  ) =>
+      [
+        for (final t in tracks)
+          if (!owned.contains(songKey(t.name, t.artist))) t,
+      ];
 
   /// Takes the 1st item of every list, then the 2nd, and so on.
   ///
