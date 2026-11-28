@@ -105,4 +105,208 @@ void main() {
       );
     });
   });
+
+  group('top tracks', () {
+    test('getArtistTopTracks sends artist, autocorrect and limit', () async {
+      final fake = fakeApi({'toptracks': {'track': []}});
+      await fake.api.getArtistTopTracks('Muse', limit: 10);
+
+      expect(fake.requests.single.url.queryParameters, {
+        'method': 'artist.gettoptracks',
+        'artist': 'Muse',
+        'autocorrect': '1',
+        'limit': '10',
+        'api_key': 'key123',
+        'format': 'json',
+      });
+    });
+
+    test('getArtistTopTracks parses name and artist in rank order', () async {
+      final fake = fakeApi({
+        'toptracks': {
+          'track': [
+            {
+              'name': 'Uprising',
+              'playcount': '1000',
+              'artist': {'name': 'Muse', 'mbid': 'x'},
+              '@attr': {'rank': '1'},
+            },
+            {
+              'name': 'Hysteria',
+              'artist': {'name': 'Muse'},
+            },
+            {'name': 'No artist'},
+          ],
+        },
+      });
+
+      expect(await fake.api.getArtistTopTracks('Muse'), [
+        (name: 'Uprising', artist: 'Muse'),
+        (name: 'Hysteria', artist: 'Muse'),
+      ]);
+    });
+
+    test('getArtistTopTracks uses the default limit', () async {
+      final fake = fakeApi({'toptracks': {'track': []}});
+      await fake.api.getArtistTopTracks('Muse');
+      expect(
+        fake.requests.single.url.queryParameters['limit'],
+        '${LastFmService.defaultLimit}',
+      );
+    });
+
+    test('getTagTopTracks reads tracks.track', () async {
+      final fake = fakeApi({
+        'tracks': {
+          'track': {
+            'name': 'Song',
+            'artist': {'name': 'Band'},
+          },
+        },
+      });
+
+      expect(await fake.api.getTagTopTracks('rock', limit: 5), [
+        (name: 'Song', artist: 'Band'),
+      ]);
+      expect(fake.requests.single.url.queryParameters, containsPair(
+        'method',
+        'tag.gettoptracks',
+      ));
+      expect(fake.requests.single.url.queryParameters['tag'], 'rock');
+    });
+
+    test('unknown artist returns an empty list', () async {
+      final fake = fakeApi({'error': 6, 'message': 'not found'}, status: 404);
+      expect(await fake.api.getArtistTopTracks('zzzz'), isEmpty);
+    });
+  });
+
+  group('similar', () {
+    test('getSimilarArtists parses names and match (number or string)',
+        () async {
+      final fake = fakeApi({
+        'similarartists': {
+          'artist': [
+            {'name': 'Radiohead', 'match': '1'},
+            {'name': 'Placebo', 'match': 0.75},
+          ],
+        },
+      });
+
+      expect(await fake.api.getSimilarArtists('Muse', limit: 2), [
+        (name: 'Radiohead', match: 1.0),
+        (name: 'Placebo', match: 0.75),
+      ]);
+      expect(fake.requests.single.url.queryParameters, containsPair(
+        'method',
+        'artist.getsimilar',
+      ));
+    });
+
+    test('getSimilarTracks sends artist and track', () async {
+      final fake = fakeApi({
+        'similartracks': {
+          'track': [
+            {
+              'name': 'Paranoid Android',
+              'match': 1.0,
+              'artist': {'name': 'Radiohead'},
+            },
+          ],
+        },
+      });
+
+      expect(await fake.api.getSimilarTracks('Muse', 'Starlight'), [
+        (name: 'Paranoid Android', artist: 'Radiohead'),
+      ]);
+      final params = fake.requests.single.url.queryParameters;
+      expect(params['method'], 'track.getsimilar');
+      expect(params['artist'], 'Muse');
+      expect(params['track'], 'Starlight');
+      expect(params['autocorrect'], '1');
+    });
+
+    test('getSimilarTags returns names; empty when Last.fm has none',
+        () async {
+      final withTags = fakeApi({
+        'similartags': {
+          'tag': [
+            {'name': 'indie rock', 'url': 'u'},
+            {'name': 'britpop', 'url': 'u'},
+          ],
+        },
+      });
+      expect(
+        await withTags.api.getSimilarTags('rock'),
+        ['indie rock', 'britpop'],
+      );
+
+      final empty = fakeApi({
+        'similartags': {
+          'tag': [],
+          '@attr': {'tag': 'rock'},
+        },
+      });
+      expect(await empty.api.getSimilarTags('rock'), isEmpty);
+    });
+  });
+
+  group('charts', () {
+    test('getChartTopTracks parses tracks and sends the limit', () async {
+      final fake = fakeApi({
+        'tracks': {
+          'track': [
+            {
+              'name': 'Hit',
+              'playcount': '99',
+              'artist': {'name': 'Star'},
+            },
+          ],
+        },
+      });
+
+      expect(await fake.api.getChartTopTracks(limit: 20), [
+        (name: 'Hit', artist: 'Star'),
+      ]);
+      expect(fake.requests.single.url.queryParameters, {
+        'method': 'chart.gettoptracks',
+        'limit': '20',
+        'api_key': 'key123',
+        'format': 'json',
+      });
+    });
+
+    test('getChartTopArtists returns names in order', () async {
+      final fake = fakeApi({
+        'artists': {
+          'artist': [
+            {'name': 'A', 'playcount': '2'},
+            {'name': 'B', 'playcount': '1'},
+          ],
+        },
+      });
+      expect(await fake.api.getChartTopArtists(), ['A', 'B']);
+    });
+
+    test('getChartTopTags returns names in order', () async {
+      final fake = fakeApi({
+        'tags': {
+          'tag': [
+            {'name': 'pop', 'reach': '100'},
+            {'name': 'rock', 'reach': '90'},
+          ],
+        },
+      });
+      expect(await fake.api.getChartTopTags(limit: 2), ['pop', 'rock']);
+    });
+
+    test('chart errors throw LastFmApiException', () async {
+      final fake = fakeApi({'error': 29, 'message': 'Rate limit'}, status: 429);
+      expect(
+        fake.api.getChartTopTags(),
+        throwsA(isA<LastFmApiException>()
+            .having((e) => e.errorCode, 'errorCode', 29)),
+      );
+    });
+  });
 }
