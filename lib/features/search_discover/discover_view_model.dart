@@ -12,11 +12,13 @@ class DiscoverViewModel extends ChangeNotifier {
 
   final DiscoverRepository _discover;
 
-  /// Modes implemented so far; the other cards show "Coming soon".
+  /// Modes implemented so far; cards of other modes show "Coming soon".
+  /// [DiscoverMode.custom] (own parameters) has its own input, not a card.
   static const readyModes = {
     DiscoverMode.fromArtists,
     DiscoverMode.fromGenres,
     DiscoverMode.youCouldLike,
+    DiscoverMode.toTry,
   };
 
   /// The four cards of the 2×2 grid, in order.
@@ -79,6 +81,7 @@ class DiscoverViewModel extends ChangeNotifier {
       DiscoverMode.fromArtists => _discover.newFromYourArtists(),
       DiscoverMode.fromGenres => _discover.newFromYourGenres(),
       DiscoverMode.youCouldLike => _discover.musicYouCouldLike(),
+      DiscoverMode.toTry => _discover.musicToTry(),
       _ => Future.value(Result.error(Exception('$mode is not ready'))),
     };
   }

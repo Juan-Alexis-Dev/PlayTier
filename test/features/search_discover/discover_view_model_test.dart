@@ -46,8 +46,10 @@ void main() {
     expect(vm.canRun(DiscoverMode.fromArtists), isTrue);
     expect(vm.canRun(DiscoverMode.fromGenres), isTrue);
     expect(vm.canRun(DiscoverMode.youCouldLike), isTrue);
-    expect(vm.isReady(DiscoverMode.toTry), isFalse);
-    expect(vm.canRun(DiscoverMode.toTry), isFalse);
+    expect(vm.canRun(DiscoverMode.toTry), isTrue);
+    // Own parameters is not a card mode yet.
+    expect(vm.isReady(DiscoverMode.custom), isFalse);
+    expect(vm.canRun(DiscoverMode.custom), isFalse);
   });
 
   test('nothing can run without Last.fm', () {
@@ -113,7 +115,7 @@ void main() {
   });
 
   test('a mode that is not ready does nothing', () async {
-    expect(await vm.run(DiscoverMode.toTry), isNull);
+    expect(await vm.run(DiscoverMode.custom), isNull);
     verifyNever(() => discover.newFromYourArtists(
           maxTracks: any(named: 'maxTracks'),
         ));
@@ -144,5 +146,13 @@ void main() {
         )).thenAnswer((_) async => const Result.ok(likeDraft));
 
     expect(await vm.run(DiscoverMode.youCouldLike), likeDraft);
+  });
+
+  test('toTry runs musicToTry', () async {
+    const tryDraft = PlaylistDraft(name: 'Music to try', tracks: [track]);
+    when(() => discover.musicToTry(maxTracks: any(named: 'maxTracks')))
+        .thenAnswer((_) async => const Result.ok(tryDraft));
+
+    expect(await vm.run(DiscoverMode.toTry), tryDraft);
   });
 }
