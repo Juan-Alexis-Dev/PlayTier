@@ -1,3 +1,5 @@
+import '../../domain/models/discover_mode.dart';
+import '../../domain/models/playlist_draft.dart';
 import '../../domain/models/result.dart';
 import '../../domain/models/search_result.dart';
 import '../../domain/models/track.dart';
@@ -9,8 +11,8 @@ import '../services/spotify/spotify_api_service.dart';
 /// Discover (FR-10): turns Last.fm suggestions into Spotify tracks the user
 /// does not have yet.
 ///
-/// The discover modes (added in the next issues) build a list of Last.fm
-/// candidates and pass it to [matchTracks], which:
+/// Each discover mode builds a list of Last.fm candidates and passes it to
+/// [matchTracks], which:
 /// 1. drops candidates already in the main playlist (same name + artist),
 ///    without calling Spotify;
 /// 2. searches each remaining one on Spotify and keeps the first result
@@ -39,8 +41,51 @@ class DiscoverRepository {
   /// Spotify searches sent at the same time.
   static const _parallelSearches = 5;
 
+  /// Mode 1: user's artists with the most tracks in the main playlist.
+  static const artistsPerRun = 10;
+
+  /// Mode 1: Last.fm top tracks requested per artist. Most popular ones
+  /// are often owned already, so this is larger than what is kept.
+  static const tracksPerArtist = 15;
+
   /// Discover needs Last.fm; the UI hides it when this is false.
   bool get isAvailable => _lastFm != null;
+
+  /// Mode 1, "New music from your artists" (FR-10.1).
+  ///
+  /// Takes the [artistsPerRun] main artists with the most tracks in the
+  /// main playlist, asks Last.fm for each one's top tracks, drops the ones
+  /// already owned and mixes the rest one artist at a time (most popular
+  /// first), so no artist fills the whole list.
+  Future<Result<PlaylistDraft>> newFromYourArtists({
+    int maxTracks = defaultMaxTracks,
+  }) async {
+    final lastFm = _lastFm;
+    if (lastFm == null) return Result.error(_noLastFm);
+
+    try {
+      final artists = await _topArtistNames(artistsPerRun);
+      final topTracks = await Future.wait([
+        for (final artist in artists)
+          lastFm.getArtistTopTracks(artist, limit: tracksPerArtist),
+      ]);
+      // Drop owned tracks before mixing, so every artist keeps its turn.
+      final owned = (await _ownedSongs()).keys;
+      final fresh = [
+        for (final list in topTracks)
+          [
+            for (final t in list)
+              if (!owned.contains(songKey(t.name, t.artist))) t,
+          ],
+      ];
+      return _draft(
+        DiscoverMode.fromArtists,
+        await matchTracks(interleave(fresh), maxTracks: maxTracks),
+      );
+    } on Exception catch (e) {
+      return Result.error(e);
+    }
+  }
 
   /// Matches Last.fm [candidates] to Spotify tracks not in the main
   /// playlist, keeping the candidates' order, up to [maxTracks].
@@ -92,6 +137,51 @@ class DiscoverRepository {
       return Result.error(e);
     }
   }
+
+  /// Wraps matched tracks in a draft named after [mode].
+  static Result<PlaylistDraft> _draft(
+    DiscoverMode mode,
+    Result<List<SearchResult>> matched,
+  ) {
+    return switch (matched) {
+      Ok(:final value) => Result.ok(PlaylistDraft(
+          name: mode.title,
+          tracks: [for (final r in value) r.track],
+        )),
+      Error(:final error) => Result.error(error),
+    };
+  }
+
+  /// Main artists (position 0) by number of tracks in the main playlist,
+  /// most first; ties by name.
+  Future<List<String>> _topArtistNames(int limit) async {
+    final rows = await _db.customSelect(
+      'SELECT a.name AS name, COUNT(*) AS c '
+      'FROM track_artists ta '
+      'JOIN artists a ON a.id = ta.artist_id '
+      'WHERE ta.position = 0 '
+      'GROUP BY a.id '
+      'ORDER BY c DESC, a.name '
+      'LIMIT $limit',
+    ).get();
+    return [for (final row in rows) row.read<String>('name')];
+  }
+
+  /// Takes the 1st item of every list, then the 2nd, and so on.
+  ///
+  /// `[[a1, a2], [b1], [c1, c2, c3]]` → `[a1, b1, c1, a2, c2, c3]`.
+  static List<T> interleave<T>(List<List<T>> lists) {
+    final result = <T>[];
+    final longest = lists.fold(0, (max, l) => l.length > max ? l.length : max);
+    for (var i = 0; i < longest; i++) {
+      for (final list in lists) {
+        if (i < list.length) result.add(list[i]);
+      }
+    }
+    return result;
+  }
+
+  static final _noLastFm = Exception('Last.fm API key is not configured.');
 
   /// First Spotify track with the candidate's name and artist, or null.
   Future<SpotifyPlaylistItemDto?> _findOnSpotify(LastFmTrack candidate) async {

@@ -2,12 +2,14 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playtier/data/repositories/discover_repository.dart';
+import 'package:playtier/data/services/lastfm/lastfm_api_exception.dart';
 import 'package:playtier/data/services/lastfm/lastfm_service.dart';
 import 'package:playtier/data/services/local/app_database.dart';
 import 'package:playtier/data/services/spotify/dto/spotify_artist_dto.dart';
 import 'package:playtier/data/services/spotify/dto/spotify_playlist_item_dto.dart';
 import 'package:playtier/data/services/spotify/spotify_api_exception.dart';
 import 'package:playtier/data/services/spotify/spotify_api_service.dart';
+import 'package:playtier/domain/models/playlist_draft.dart';
 import 'package:playtier/domain/models/result.dart';
 import 'package:playtier/domain/models/search_result.dart';
 
@@ -41,6 +43,7 @@ LastFmTrack lf(String name, [String artist = 'Muse']) =>
 void main() {
   late AppDatabase db;
   late MockSpotify api;
+  late MockLastFm lastFm;
   late DiscoverRepository repo;
 
   /// Spotify answers by query: `track:"<name>" artist:"<artist>"`.
@@ -69,7 +72,8 @@ void main() {
   setUp(() async {
     db = AppDatabase(NativeDatabase.memory());
     api = MockSpotify();
-    repo = DiscoverRepository(api: api, db: db, lastFm: MockLastFm());
+    lastFm = MockLastFm();
+    repo = DiscoverRepository(api: api, db: db, lastFm: lastFm);
     spotify = {};
     stubSearch();
 
@@ -268,5 +272,145 @@ void main() {
       await repo.matchTracks([lf('Uprising')]),
       isA<Error<List<SearchResult>>>(),
     );
+  });
+
+  test('interleave takes one item of each list per round', () {
+    expect(
+      DiscoverRepository.interleave([
+        ['a1', 'a2'],
+        ['b1'],
+        <String>[],
+        ['c1', 'c2', 'c3'],
+      ]),
+      ['a1', 'b1', 'c1', 'a2', 'c2', 'c3'],
+    );
+    expect(DiscoverRepository.interleave(<List<int>>[]), isEmpty);
+  });
+
+  group('newFromYourArtists', () {
+    Future<void> addTrack(String id, String name, List<String> artistIds) async {
+      await db.into(db.tracks).insert(TracksCompanion.insert(
+            id: id,
+            uri: 'spotify:track:$id',
+            name: name,
+            albumId: 'al',
+            albumName: 'Album',
+            durationMs: 200000,
+            position: 1,
+          ));
+      for (final (i, artistId) in artistIds.indexed) {
+        await db.into(db.trackArtists).insert(TrackArtistsCompanion.insert(
+              trackId: id,
+              artistId: artistId,
+              position: i,
+            ));
+      }
+    }
+
+    void stubTopTracks(Map<String, List<LastFmTrack>> byArtist) {
+      when(() => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')))
+          .thenAnswer((invocation) async {
+        final artist = invocation.positionalArguments.first as String;
+        return byArtist[artist] ?? const [];
+      });
+    }
+
+    setUp(() async {
+      // Library: Radiohead 2 tracks, Muse 1 (setUp above), Guest only
+      // as a featured artist (not a main artist).
+      await db.into(db.artists).insert(
+            ArtistsCompanion.insert(id: 'rh', name: 'Radiohead'),
+          );
+      await db.into(db.artists).insert(
+            ArtistsCompanion.insert(id: 'guest', name: 'Guest'),
+          );
+      await addTrack('rh1', 'Airbag', ['rh', 'guest']);
+      await addTrack('rh2', 'No Surprises', ['rh', 'guest']);
+    });
+
+    PlaylistDraft draftOf(Result<PlaylistDraft> result) =>
+        (result as Ok<PlaylistDraft>).value;
+
+    test('asks Last.fm for the main artists, most tracks first', () async {
+      stubTopTracks({});
+
+      await repo.newFromYourArtists();
+
+      final calls = verify(() => lastFm.getArtistTopTracks(
+            captureAny(),
+            limit: DiscoverRepository.tracksPerArtist,
+          )).captured;
+      expect(calls, ['Radiohead', 'Muse']);
+    });
+
+    test('mixes artists, skips owned tracks and names the draft', () async {
+      stubTopTracks({
+        'Radiohead': [lf('Creep', 'Radiohead'), lf('Karma Police', 'Radiohead')],
+        'Muse': [lf('Starlight'), lf('Uprising')], // Starlight is owned
+      });
+      spotify[q('Creep', 'Radiohead')] = [
+        dto('creep', 'Creep', artists: ['Radiohead']),
+      ];
+      spotify[q('Karma Police', 'Radiohead')] = [
+        dto('karma', 'Karma Police', artists: ['Radiohead']),
+      ];
+      spotify[q('Uprising')] = [dto('upr', 'Uprising')];
+
+      final draft = draftOf(await repo.newFromYourArtists());
+
+      expect(draft.name, 'New music from your artists');
+      expect(draft.tracks.map((t) => t.id), ['creep', 'upr', 'karma']);
+    });
+
+    test('respects maxTracks', () async {
+      stubTopTracks({
+        'Radiohead': [lf('Creep', 'Radiohead')],
+        'Muse': [lf('Uprising')],
+      });
+      spotify[q('Creep', 'Radiohead')] = [
+        dto('creep', 'Creep', artists: ['Radiohead']),
+      ];
+      spotify[q('Uprising')] = [dto('upr', 'Uprising')];
+
+      final draft = draftOf(await repo.newFromYourArtists(maxTracks: 1));
+      expect(draft.tracks.map((t) => t.id), ['creep']);
+    });
+
+    test('an empty library returns an empty draft without calls', () async {
+      await db.delete(db.trackArtists).go();
+      await db.delete(db.tracks).go();
+      stubTopTracks({});
+
+      final draft = draftOf(await repo.newFromYourArtists());
+
+      expect(draft.tracks, isEmpty);
+      verifyNever(
+        () => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')),
+      );
+    });
+
+    test('a Last.fm error returns Error', () async {
+      when(() => lastFm.getArtistTopTracks(any(), limit: any(named: 'limit')))
+          .thenThrow(const LastFmApiException(429, 'Rate limit', errorCode: 29));
+
+      expect(
+        await repo.newFromYourArtists(),
+        isA<Error<PlaylistDraft>>(),
+      );
+    });
+
+    test('without Last.fm returns Error and calls nothing', () async {
+      final noLastFm = DiscoverRepository(api: api, db: db, lastFm: null);
+
+      expect(
+        await noLastFm.newFromYourArtists(),
+        isA<Error<PlaylistDraft>>(),
+      );
+      verifyNever(() => api.searchTracks(
+            any(),
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+          ));
+    });
   });
 }
